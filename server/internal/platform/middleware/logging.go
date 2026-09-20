@@ -27,6 +27,17 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
+// Flush 透传给底层：否则 SSE 这类需要逐帧推送的连接会被包装层憋住，
+// 上层做 http.Flusher 类型断言也会失败。
+func (w *responseWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap 让标准库的 ResponseController 等能力可以穿透到原始 writer。
+func (w *responseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 // Logger 输出每条请求的访问日志：route / status / duration / request_id。
 // 注意：这里绝不记录 body、密码、令牌与任何儿童隐私字段。
 func Logger(log *slog.Logger) func(http.Handler) http.Handler {
