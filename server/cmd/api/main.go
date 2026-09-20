@@ -16,6 +16,7 @@ import (
 
 	"kidstudy/internal/config"
 	"kidstudy/internal/feature/auth"
+	"kidstudy/internal/feature/children"
 	"kidstudy/internal/feature/system"
 	platformauth "kidstudy/internal/platform/auth"
 	"kidstudy/internal/platform/logger"
@@ -36,15 +37,22 @@ func registerFeatures(r chi.Router, cfg config.Config, log *slog.Logger, db *pos
 	tokens := platformauth.NewTokenService(cfg.AuthSecret, cfg.AccessTokenTTL, cfg.UnlockTokenTTL)
 	requireAuth := middleware.RequireAuth(tokens, log)
 
-	authH := auth.NewHandler(
-		auth.NewService(auth.NewRepository(db.Pool()), tokens, cfg, log),
-		cfg,
+	authSvc := auth.NewService(auth.NewRepository(db.Pool()), tokens, cfg, log)
+	authH := auth.NewHandler(authSvc, cfg, log)
+
+	childrenH := children.NewHandler(
+		children.NewService(children.NewRepository(db.Pool())),
 		log,
 	)
 
 	// 业务 API 统一走 /api/v1；健康检查留在根路径，供编排直接探活
 	r.Route("/api/v1", func(r chi.Router) {
 		authH.Register(r, requireAuth)
+
+		r.Group(func(r chi.Router) {
+			r.Use(requireAuth)
+			childrenH.Register(r)
+		})
 	})
 }
 
