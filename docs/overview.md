@@ -79,6 +79,33 @@
 2. 配图方案：CC0 图库自动匹配 vs AI 生成统一风格插画
 3. 「标准内容的重复学习次数」的两个口径是否都要：当日重复练习量 vs 单个知识点掌握前花了多少遍（当前设计两者都记）
 
+## 编码阶段进度
+
+| 里程碑 | 状态 | 交付内容 |
+| --- | --- | --- |
+| **M0 基础设施** | ✅ 已完成 | Go 骨架、配置集中校验（fail-fast）、`apperr` 类型化错误、slog JSON 日志、请求 ID、6 层中间件链、连接池、迁移框架（`-migrate` / `-rollback`）、`/health` `/ready`、优雅停机 |
+| **M1 认证与孩子档案** | ✅ 已完成 | 邀请码注册、登录与失败锁定、Refresh 轮换与撤销、PIN 二次校验、扫码登录（二维码 60s + SSE 四事件 + 一次性兑换码）、孩子档案 CRUD（软归档 + 家长独占） |
+| **M2 内容底座** | ⏳ 待开工 | 内容表与 importer、笔顺数据、检索接口、审核队列、`curriculum_plan` 基准线生成 |
+
+### 连接层定 sqlc（2026-09-20 晚拍板）
+
+- 工具：`tools/sqlc.exe`（**v1.31.1**，官方 Release 的 Windows amd64；被 `*.exe` 规则忽略，**不入库**，重装时重新下载同版本即可）。
+- 已验证：能完整解析 `migrations/0001+0002` 的 DDL（uuid / jsonb / 部分索引 / `COMMENT ON` 均识别），
+  生成代码正确处理可空列与 jsonb，并把表/列的 COMMENT 带进 Go 注释。
+- 待补依赖：`github.com/sqlc-dev/pqtype`（`login_audit` 的 inet 列会用到）。
+- **明确不用 ORM**：批量导入（8103 字 / 48000 组词 / 18913 故事）与复杂查询（今日编排、SM-2、多孩对比）
+  是本项目主负载，恰是 ORM 短板；且内容资产先于代码存在，SQL-first 比 Code-first 更契合。
+- M1 已验收的手写 pgx 仓库**不动**。
+
 ## 下一步
 
-内容底座已基本就绪（汉字 / 组词 / 单词 / 故事四项均可投入 M2）。**编码阶段以 `docs/开发设计文档.md` 为准**：M0 基础设施（骨架 + 配置校验 + 错误/日志体系 + `/health` `/ready` + 迁移框架）→ M1 认证与扫码登录 → M2 内容底座与 importer。M0 不依赖内容数据，审核通过后即可开工。
+**M2 内容底座**开工要点：
+
+1. 在 `server/` 建 `sqlc.yaml`，`schema` 指向 `migrations/`，`queries/` 单独建目录按模块分文件，生成包输出到 `internal/feature/content/dbgen/`。
+2. 迁移 0003 建内容表：汉字（`hanzi`）、组词（`hanzi_words`）、英语词（`en_words`）、故事（`stories`）、双语配对（`story_pairs`）、阶段字典导入（`stages` 用 `var/raw/stages.json`）。
+3. `cmd/importer` 写一次性导入器，跑完核对字数：汉字 8103、组词约 48000、故事 18913、双语配对 831。
+4. 故事默认 `pending`，家长后台勾选才转 `published`。
+5. `curriculum_plan` 按标准节奏铺 Day 1…Day N 基准线（语文 6 字 / 数学 2 档 / 英语 5 词）。
+
+本地开发约定：**8080 被 Jenkins 占用，统一用 18080**；本机有代理，curl 本机服务必须加 `--noproxy '*'`；
+PostgreSQL 18.6 为 Automatic 服务，开机自启。
