@@ -38,6 +38,8 @@ func (h *Handler) Register(r chi.Router, requireAuth func(http.Handler) http.Han
 		r.Post("/login", h.login)
 		r.Post("/refresh", h.refresh)
 
+		h.registerQR(r, requireAuth)
+
 		r.Group(func(r chi.Router) {
 			r.Use(requireAuth)
 			r.Post("/logout", h.logout)
@@ -47,6 +49,12 @@ func (h *Handler) Register(r chi.Router, requireAuth func(http.Handler) http.Han
 		})
 	})
 }
+
+// errUnauthorized 与 errStreamUnsupported 是 auth 内部复用的固定错误文案。
+var (
+	errUnauthorized      = apperr.Unauthorized("登录已失效，请重新登录")
+	errStreamUnsupported = apperr.BadRequest("当前连接不支持事件流")
+)
 
 // register POST /auth/register
 func (h *Handler) register(w http.ResponseWriter, r *http.Request) {

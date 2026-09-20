@@ -31,6 +31,7 @@ type Service struct {
 	tokens *platformauth.TokenService
 	cfg    config.Config
 	log    *slog.Logger
+	qr     *QRHub
 
 	mu       sync.Mutex
 	failures map[string]failureState
@@ -42,18 +43,19 @@ type failureState struct {
 	lockedTill time.Time
 }
 
-// NewService 构造 auth 服务。
+// NewService 构造 auth 服务。扫码事件中心在内部创建，HTTP 层按需订阅即可。
 func NewService(repo *Repository, tokens *platformauth.TokenService, cfg config.Config, log *slog.Logger) *Service {
 	return &Service{
 		repo:     repo,
 		tokens:   tokens,
 		cfg:      cfg,
 		log:      log,
+		qr:       NewQRHub(),
 		failures: make(map[string]failureState),
 	}
 }
 
-// Token represents issued credentials handed back to the caller.
+// Token 是签发完成后交给上层的令牌组合。
 // RefreshCipher 只在服务端与 HttpOnly Cookie 之间流转，绝不写进响应体。
 type Token struct {
 	Session

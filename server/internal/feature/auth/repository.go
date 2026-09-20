@@ -193,5 +193,131 @@ func nullable(s string) *string {
 	return &s
 }
 
+// ---------- 扫码登录 ----------
+
+// QRSession 是扫码会话的库内视图。
+type QRSession struct {
+	ID                uuid.UUID
+	Status            string
+	CreatorIP         *string
+	CreatorUA         *string
+	ParentID          *uuid.UUID
+	ScanCount         int
+	FailedCount       int
+	ExchangeHash      *string
+	ExchangeExpiresAt *time.Time
+	ExpiresAt         time.Time
+}
+
+// CreateQRSession 登记二维码会话。库内只存令牌哈希，二维码被截屏也无法反查。
+func (r *Repository) CreateQRSession(ctx context.Context, tokenHash, ip, ua string, expiresAt time.Time) (uuid.UUID, error) {
+	const q = `
+INSERT INTO qr_login_sessions (qr_token, creator_ip, creator_ua, expires_at)
+VALUES ($1, nullif($2, '')::inet, $3, $4)
+RETURNING id`
+
+	var id uuid.UUID
+	if err := r.db.QueryRow(ctx, q, tokenHash, ip, nullable(ua), expiresAt).Scan(&id); err != nil {
+		return uuid.Nil, fmt.Errorf("创建扫码会话失败: %w", err)
+	}
+	return id, nil
+}
+
+// FindQRSession 按令牌哈希查会话。
+func (r *Repository) FindQRSession(ctx context.Context, tokenHash string) (QRSession, error) {
+	const q = `
+SELECT id, status, host(creator_ip), coalesce(creator_ua, ''), parent_id,
+       scan_count, failed_count, exchange_code_hash, exchange_expires_at, expires_at
+FROM qr_login_sessions WHERE qr_token = $1`
+
+	var s QRSession
+	err := r.db.QueryRow(ctx, q, tokenHash).Scan(
+		&s.ID, &s.Status, &s.CreatorIP, &s.CreatorUA, &s.ParentID,
+		&s.ScanCount, &s.FailedCount, &s.ExchangeHash, &s.ExchangeExpiresAt, &s.ExpiresAt,
+	)
+	if err != nil {
+		return QRSession{}, err
+	}
+	return s, nil
+}
+
+// MarkScanned 标记已扫码并累加扫码次数。
+func (r *Repository) MarkScanned(ctx context.Context, id, parentID uuid.UUID) error {
+	tag, err := r.db.Exec(ctx, `
+UPDATE qr_login_sessions
+SET status = 'scanned', parent_id = $2, scan_count = scan_count + 1
+WHERE id = $1 AND status = 'waiting' AND expires_at > now()`, id, parentID)
+	if err != nil {
+		return fmt.Errorf("更新扫码状态失败: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return errQRNotAvailable
+	}
+	return nil
+}
+
+// ConfirmQR 写入一次性兑换码哈希与其 30 秒有效期。
+func (r *Repository) ConfirmQR(ctx context.Context, id, parentID uuid.UUID, codeHash string, expiresAt time.Time) error {
+	tag, err := r.db.Exec(ctx, `
+UPDATE qr_login_sessions
+SET status = 'confirmed', parent_id = $2,
+    exchange_code_hash = $3, confirmed_at = now(), exchange_expires_at = $4
+WHERE id = $1 AND status IN ('waiting', 'scanned') AND expires_at > now()`, id, parentID, codeHash, expiresAt)
+	if err != nil {
+		return fmt.Errorf("确认扫码失败: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return errQRNotAvailable
+	}
+	return nil
+}
+
+// MarkExchanged 标记兑换完成（兑换码即焚）。
+func (r *Repository) MarkExchanged(ctx context.Context, id uuid.UUID) error {
+	_, err := r.db.Exec(ctx, `
+UPDATE qr_login_sessions SET status = 'exchanged' WHERE id = $1`, id)
+	return err
+}
+
+// NoteExchangeFailure 累加失败次数，达到阈值后把会话置为 failed。
+func (r *Repository) NoteExchangeFailure(ctx context.Context, id uuid.UUID, threshold int) error {
+	tag, err := r.db.Exec(ctx, `
+UPDATE qr_login_sessions
+SET failed_count = failed_count + 1,
+    status = CASE WHEN failed_count + 1 >= $2 THEN 'failed' ELSE status END
+WHERE id = $1`, id, threshold)
+	if err != nil {
+		return fmt.Errorf("记录兑换失败失败: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return errQRNotAvailable
+	}
+	return nil
+}
+
+// MarkExpired 显式标记过期（SSE 推送 expired 时调用）。
+func (r *Repository) MarkExpired(ctx context.Context, id uuid.UUID) error {
+	_, err := r.db.Exec(ctx, `
+UPDATE qr_login_sessions SET status = 'expired'
+WHERE id = $1 AND status IN ('waiting', 'scanned') AND expires_at <= now()`, id)
+	return err
+}
+
+// CountRecentScans 统计该家长最近一分钟的扫码次数，用于限速。
+func (r *Repository) CountRecentScans(ctx context.Context, parentID uuid.UUID, window time.Duration) (int, error) {
+	var n int
+	err := r.db.QueryRow(ctx, `
+SELECT count(*) FROM qr_login_sessions
+WHERE parent_id = $1 AND created_at > now() - ($2 || ' seconds')::interval`,
+		parentID, fmt.Sprintf("%.0f", window.Seconds())).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("统计扫码次数失败: %w", err)
+	}
+	return n, nil
+}
+
+// errQRNotAvailable 表示二维码不在可用状态（已过期/已兑换/状态不符）。
+var errQRNotAvailable = errors.New("二维码不可用")
+
 // ErrNoRows 供上层判断「查无记录」，避免 service 直接 import pgx。
 var ErrNoRows = pgx.ErrNoRows
