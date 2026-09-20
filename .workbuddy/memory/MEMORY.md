@@ -44,10 +44,29 @@
 - **端到端冒烟要写成脚本执行**：命令行里出现口令、长串 Bearer 时会被安全策略拦下等待确认（超时即中止）。放 `server/tmp/*.py`（已 gitignore）再跑最稳。
 - Git Bash 执行 `.sh` 脚本会触发 wsl.exe 黑名单，别走这条路。
 
+## 技术栈决策（2026-09-20 晚）
+
+- **不换语言，继续 Go**。用户问过是否改 C# + EF Core，结论：ORM 是库不是语言特性，
+  换成 C# 只会为了已经能用 sqlc/bun/Ent 解决的小痛点付出全量重写成本。
+- **连接层定 sqlc**。工具：`tools/sqlc.exe`（v1.31.1，官方 Release 的 Windows amd64，
+  已被 `*.exe` 规则忽略，不入库；重装时重新下载同版本即可。查版本：`./tools/sqlc.exe version`。
+- 已实测 sqlc 能完整解析 `migrations/0001+0002` 的 DDL（含 uuid / jsonb / 部分索引 /
+  COMMENT ON），生成代码处理好：可空列→`sql.NullString`、jsonb→`json.RawMessage`、
+  表与列的 COMMENT 会带进 Go 注释。
+- 生成代码需要依赖 `github.com/google/uuid`（已有）与 `github.com/sqlc-dev/pqtype`
+  （login_audit 的 inet 列会用到）；正式接入时补进 go.mod。
+- **不用 ORM（EF Core 之类）的三条理由**：① 本项目负载是「批量导入 8103 字/48000 组词/
+  18913 故事」+「复杂查询（今日编排、SM-2、多孩对比）」，ORM 恰好在批量写入与复杂 SQL 上
+  是短板；② Code First 的"双向同步"实为单向 diff + 人工 review，schema 变更里的数据迁移
+  ORM 仍解决不了；③ 内容资产先于代码存在（数据先行），SQL-first 比 Code-first 更契合。
+- 若日后觉得简单 CRUD 啰嗦，可在同一项目里给那一小块单独引入 `bun`（与 sqlc 可共存），
+  不必二选一。
+- `.gitignore` 已追加 `tools/sqlc` 规则（对 `*.exe` 而言冗余，但无害，保留）。
+
 ## M1 已交付（认证 + 孩子档案）
 
 - 端点全在 `/api/v1`：`/auth/{register,login,refresh,logout,me,pin,qrcode/*}`、`/children[/{id}]`。
 - Access 15m JWT（typ=access）/ PIN 解锁 5m JWT（typ=unlock）**用途隔离**；Refresh 走 HttpOnly Cookie 且每次刷新轮换。
 - 二维码令牌与兑换码只在库里留 SHA-256；二维码 60s、兑换码 30s 一次性，失败 5 次作废。
 - 所有 children 查询强制带 `parent_id`，越权返回 404（非 403，避免暴露 ID 是否存在）；删除是软归档。
-- M2 开工前需决定连接层是否切 sqlc（M1 为赶进度手写 pgx repository）。
+- ~~M2 开工前需决定连接层是否切 sqlc~~ → 已定：用 sqlc，见「技术栈决策」。M1 手写部分不动。
