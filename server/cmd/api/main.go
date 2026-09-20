@@ -15,12 +15,38 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"kidstudy/internal/config"
+	"kidstudy/internal/feature/auth"
 	"kidstudy/internal/feature/system"
+	platformauth "kidstudy/internal/platform/auth"
 	"kidstudy/internal/platform/logger"
+	"kidstudy/internal/platform/middleware"
 	"kidstudy/internal/platform/postgres"
 	httpsrv "kidstudy/internal/platform/server"
 	migrations "kidstudy/migrations"
 )
+
+// registerFeatures 装配各业务模块。
+//
+// 数据库不可达时逐个 return）：/health、/ready 仍要能回答，便于排障时先让探针说话。
+func registerFeatures(r chi.Router, cfg config.Config, log *slog.Logger, db *postgres.DB) {
+	if db == nil {
+		return
+	}
+
+	tokens := platformauth.NewTokenService(cfg.AuthSecret, cfg.AccessTokenTTL, cfg.UnlockTokenTTL)
+	requireAuth := middleware.RequireAuth(tokens, log)
+
+	authH := auth.NewHandler(
+		auth.NewService(auth.NewRepository(db.Pool()), tokens, cfg, log),
+		cfg,
+		log,
+	)
+
+	// 业务 API 统一走 /api/v1；健康检查留在根路径，供编排直接探活
+	r.Route("/api/v1", func(r chi.Router) {
+		authH.Register(r, requireAuth)
+	})
+}
 
 func main() {
 	var (
@@ -74,6 +100,7 @@ func main() {
 
 	handler := httpsrv.NewRouter(cfg, log, func(r chi.Router) {
 		health.Register(r)
+		registerFeatures(r, cfg, log, db)
 	})
 
 	if err := httpsrv.Run(ctx, cfg, log, handler); err != nil && !errors.Is(err, context.Canceled) {
