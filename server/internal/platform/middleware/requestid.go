@@ -2,27 +2,16 @@
 package middleware
 
 import (
-	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"net/http"
+
+	"kidstudy/internal/platform/requestctx"
 )
 
-type ctxKey int
+// RequestIDHeader 转发自 requestctx，便于 HTTP 层统一引用。
+const RequestIDHeader = requestctx.RequestIDHeader
 
-const requestIDKey ctxKey = iota
-
-// RequestIDHeader 是透传/返回给客户端的请求 ID 头。
-const RequestIDHeader = "X-Request-ID"
-
-// NewRequestID 生成请求 ID（无外部依赖，短小够用）。
-func NewRequestID() string {
-	b := make([]byte, 12)
-	if _, err := rand.Read(b); err != nil {
-		return "req-fallback"
-	}
-	return "req-" + hex.EncodeToString(b)
-}
+// NewRequestID 生成请求 ID。
+var NewRequestID = requestctx.NewRequestID
 
 // RequestID 保证每个请求都有 ID：优先信任上游代理传来的值，否则生成；
 // 同时写回响应头，便于客户端与日志对照。
@@ -33,15 +22,6 @@ func RequestID(next http.Handler) http.Handler {
 			id = NewRequestID()
 		}
 		w.Header().Set(RequestIDHeader, id)
-		ctx := context.WithValue(r.Context(), requestIDKey, id)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(w, r.WithContext(requestctx.WithRequestID(r.Context(), id)))
 	})
-}
-
-// RequestIDFromContext 取出请求 ID，缺失时返回空串。
-func RequestIDFromContext(ctx context.Context) string {
-	if v, ok := ctx.Value(requestIDKey).(string); ok {
-		return v
-	}
-	return ""
 }

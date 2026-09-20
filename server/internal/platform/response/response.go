@@ -10,7 +10,7 @@ import (
 	"net/http"
 
 	"kidstudy/internal/platform/apperr"
-	"kidstudy/internal/platform/middleware"
+	"kidstudy/internal/platform/requestctx"
 )
 
 // Meta 携带与请求相关的元信息。后续会补部分页字段。
@@ -38,7 +38,7 @@ type errEnvelope struct {
 func JSON(w http.ResponseWriter, r *http.Request, status int, data any) {
 	writeJSON(w, r, status, successEnvelope{
 		Data: data,
-		Meta: Meta{RequestID: middleware.RequestIDFromContext(r.Context())},
+		Meta: Meta{RequestID: requestctx.RequestIDFromContext(r.Context())},
 	})
 }
 
@@ -49,12 +49,12 @@ func Error(w http.ResponseWriter, r *http.Request, log *slog.Logger, err error) 
 	switch {
 	case ae.Status >= 500:
 		log.Error("request failed",
-			"request_id", middleware.RequestIDFromContext(r.Context()),
+			"request_id", requestctx.RequestIDFromContext(r.Context()),
 			"error", err,
 		)
 	case ae.Status >= 400:
 		log.Warn("request rejected",
-			"request_id", middleware.RequestIDFromContext(r.Context()),
+			"request_id", requestctx.RequestIDFromContext(r.Context()),
 			"code", ae.Code,
 			"status", ae.Status,
 		)
@@ -62,7 +62,7 @@ func Error(w http.ResponseWriter, r *http.Request, log *slog.Logger, err error) 
 
 	writeJSON(w, r, ae.Status, errEnvelope{
 		Error: errPayload{Code: string(ae.Code), Message: ae.Message, Details: ae.Details},
-		Meta:  Meta{RequestID: middleware.RequestIDFromContext(r.Context())},
+		Meta:  Meta{RequestID: requestctx.RequestIDFromContext(r.Context())},
 	})
 }
 

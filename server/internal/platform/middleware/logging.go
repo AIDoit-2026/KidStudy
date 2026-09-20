@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"kidstudy/internal/platform/requestctx"
 	"log/slog"
 	"net/http"
 	"time"
@@ -37,7 +38,7 @@ func Logger(log *slog.Logger) func(http.Handler) http.Handler {
 			next.ServeHTTP(wrapped, r)
 
 			attrs := []any{
-				"request_id", RequestIDFromContext(r.Context()),
+				"request_id", requestctx.RequestIDFromContext(r.Context()),
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", wrapped.status,
@@ -64,7 +65,7 @@ func Recoverer(log *slog.Logger) func(http.Handler) http.Handler {
 			defer func() {
 				if rec := recover(); rec != nil {
 					log.Error("panic recovered",
-						"request_id", RequestIDFromContext(r.Context()),
+						"request_id", requestctx.RequestIDFromContext(r.Context()),
 						"panic", rec,
 						"path", r.URL.Path,
 					)
