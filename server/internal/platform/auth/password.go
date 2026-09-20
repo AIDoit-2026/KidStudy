@@ -42,8 +42,9 @@ func HashPassword(password string) (string, error) {
 // VerifyPassword 校验明文口令是否匹配哈希串。口令错误与格式错误都返回 false，
 // 具体原因只在 error 中体现，避免给调用方（进而给客户端）过多信息。
 func VerifyPassword(encoded, password string) (bool, error) {
+	// 自生成格式为 argon2id$v=19$m=..,t=..,p=..$<salt>$<key>，共 5 段
 	parts := strings.Split(encoded, "$")
-	if len(parts) != 6 || parts[0] != "argon2id" {
+	if len(parts) != 5 || parts[0] != "argon2id" {
 		return false, ErrInvalidHash
 	}
 	var memory uint32
@@ -54,11 +55,11 @@ func VerifyPassword(encoded, password string) (bool, error) {
 	if memory == 0 || iterations == 0 || threads == 0 {
 		return false, ErrInvalidHash
 	}
-	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
+	salt, err := base64.RawStdEncoding.DecodeString(parts[3])
 	if err != nil {
 		return false, ErrInvalidHash
 	}
-	want, err := base64.RawStdEncoding.DecodeString(parts[5])
+	want, err := base64.RawStdEncoding.DecodeString(parts[4])
 	if err != nil {
 		return false, ErrInvalidHash
 	}
