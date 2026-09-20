@@ -52,7 +52,15 @@ type Config struct {
 	IdleTimeout    time.Duration `env:"HTTP_IDLE_TIMEOUT" envDefault:"60s"`
 	ShutdownTimout time.Duration `env:"SHUTDOWN_TIMEOUT" envDefault:"15s"`
 
-	// 认证相关（M1 起使用，此处先占好位置：关闭公开注册，仅邀请码建号）
+	// 认证：令牌密钥与有效期。密钥只从环境变量来，绝不写进代码库
+	AuthSecret      string        `env:"AUTH_SECRET"`
+	AccessTokenTTL  time.Duration `env:"ACCESS_TOKEN_TTL" envDefault:"15m"`
+	RefreshTokenTTL time.Duration `env:"REFRESH_TOKEN_TTL" envDefault:"720h"` // 30 天
+	UnlockTokenTTL  time.Duration `env:"UNLOCK_TOKEN_TTL" envDefault:"5m"`    // PIN 解锁短令牌
+	QRCodeTTL       time.Duration `env:"QR_CODE_TTL" envDefault:"60s"`
+	ExchangeCodeTTL time.Duration `env:"EXCHANGE_CODE_TTL" envDefault:"30s"`
+
+	// 关闭公开注册：仅凭邀请码建号（首次启动用 BOOTSTRAP_INVITE_CODE）
 	BootstrapInviteCode string `env:"BOOTSTRAP_INVITE_CODE"`
 }
 
@@ -136,6 +144,26 @@ func (c Config) Validate() error {
 
 	if c.ReadTimeout <= 0 || c.WriteTimeout <= 0 || c.IdleTimeout <= 0 || c.ShutdownTimout <= 0 {
 		errs = append(errs, "HTTP 超时与 SHUTDOWN_TIMEOUT 必须为正值")
+	}
+
+	// 认证：密钥缺失或过短一律拒绝启动，避免用弱密钥签发令牌
+	if len(c.AuthSecret) < 32 {
+		errs = append(errs, fmt.Sprintf("AUTH_SECRET 缺失或过短（当前 %d 字符，至少 32）", len(c.AuthSecret)))
+	}
+	if c.AccessTokenTTL <= 0 {
+		errs = append(errs, "ACCESS_TOKEN_TTL 必须为正值")
+	}
+	if c.RefreshTokenTTL <= c.AccessTokenTTL {
+		errs = append(errs, "REFRESH_TOKEN_TTL 必须大于 ACCESS_TOKEN_TTL")
+	}
+	if c.UnlockTokenTTL <= 0 {
+		errs = append(errs, "UNLOCK_TOKEN_TTL 必须为正值")
+	}
+	if c.QRCodeTTL <= 0 || c.QRCodeTTL > 5*time.Minute {
+		errs = append(errs, "QR_CODE_TTL 必须为正值且不超过 5m")
+	}
+	if c.ExchangeCodeTTL <= 0 || c.ExchangeCodeTTL > c.QRCodeTTL {
+		errs = append(errs, "EXCHANGE_CODE_TTL 必须为正值且不超过 QR_CODE_TTL")
 	}
 
 	if len(errs) > 0 {
