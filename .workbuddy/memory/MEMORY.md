@@ -91,6 +91,30 @@
 - **本地起服务务必确认老进程已死**：老 api.exe 占着 18080 时新进程会 bind 失败，
   但 curl 仍然 200（打的是旧二进制）。用 `tasklist` 找 PID + `taskkill /F /PID`。
 
+## M3 已交付（练习引擎，2026-09-21）
+
+- 迁移 0004：mastery_records / learning_sessions / session_items / answer_logs /
+  wrong_book_entries / daily_stats / practice_assignments；种子 14 套 math_templates
+  + 14 个 `kind='math_skill'` 知识点（数学此前一个 kp 都没有）。
+- `internal/pkg/randx`：splitmix64 确定性随机源；`Derive(seed, i)` 逐题派生种子，
+  所以数学题「同一 seed 两次生成完全一致」，且与 M5 打印中心同源。
+- `mastery`：简化 SM-2（level 0–5 / ease / interval 阶梯 1h-4h-1d-3d-30d）、错题本（连对 3 次移出）、
+  复习队列（逾期优先 + >100 条时暂停新学）、难度自适应（最近 3/5 次作答）、单知识点重置。
+- `practice`：今日编排（错题置顶→专项→复习→新学，语文 6 / 英语 5 / 数学 2）、9 题型组卷、
+  服务端判分、会话结算（星级 + daily_stats 增量）、家长确认（不污染客观正确率）。
+- 端点：`/practice/{today,session,session/{id}[/answer|skip|finish|confirm],math/templates,math/preview}`、
+  `/mastery/{review-queue,wrong-book[/:id],{kpId}/reset}`。
+- 冒烟 `server/tmp/smoke_m3.py`：71 项全通过（tmp 已 gitignore，与 M2 一致不入库）。
+
+### M3 引入的新约定
+
+- **组卷素材批量装载**：`content.Service.LoadMaterials(ctx, kpIDs)` 一次拿全，
+  practice 不逐 kp 回查；干扰项从同批素材里取（同阶段/同级别），不额外查库。
+- **题面与答案分列**：`session_items.question_snapshot`（可下发）与 `answer_key`（永不下发）。
+- **跨模块归属校验**：`children.Service.EnsureOwned` 返回领域对象（非对外视图），
+  越权一律 404；mastery/practice 都通过接口注入，不直接依赖具体类型。
+- **会话作用域的 child_id 既认 query 也认 body**（读完把 body 放回去）。
+
 ## M1 已交付（认证 + 孩子档案）
 
 - 端点全在 `/api/v1`：`/auth/{register,login,refresh,logout,me,pin,qrcode/*}`、`/children[/{id}]`。

@@ -86,6 +86,7 @@
 | **M0 基础设施** | ✅ 已完成 | Go 骨架、配置集中校验（fail-fast）、`apperr` 类型化错误、slog JSON 日志、请求 ID、6 层中间件链、连接池、迁移框架（`-migrate` / `-rollback`）、`/health` `/ready`、优雅停机 |
 | **M1 认证与孩子档案** | ✅ 已完成 | 邀请码注册、登录与失败锁定、Refresh 轮换与撤销、PIN 二次校验、扫码登录（二维码 60s + SSE 四事件 + 一次性兑换码）、孩子档案 CRUD（软归档 + 家长独占） |
 | **M2 内容底座** | ✅ 已完成 | 内容域 11 张表、sqlc 生成查询、`cmd/importer` 一次性导入（汉字 8103 / 组词 29199 / 英语词 1802 / 故事 18908 / 双语配对 830 / 笔顺 6864 字）、内容检索 7 个端点、审核队列（18908 条 pending）+ 批量上线、每孩 `curriculum_plan` 基准线 9905 条 |
+| **M3 练习引擎** | ✅ 已完成 | 迁移 0004 学习域 7 张表 + 14 套数学模板与 `math_skill` 知识点、`mastery` 模块（简化 SM-2 / 错题本 / 复习队列 / 难度自适应）、`practice` 模块（今日编排 / 9 题型组卷 / 服务端判分 / 会话结算 / 家长确认）、`randx` 确定性随机源，冒烟 71 项全通过 |
 
 ### 连接层定 sqlc（2026-09-20 晚拍板，2026-09-21 落地）
 
@@ -99,19 +100,51 @@
   （200 行一条语句 + 冲突键去重），这是唯一一处手写 SQL 的例外。
 - **明确不用 ORM**：批量导入与复杂查询是本项目主负载，恰是 ORM 短板；内容资产先于代码存在，SQL-first 更契合。
 - M1 已验收的手写 pgx 仓库**不动**（auth / children 仍手写）。
+- **numeric 类型覆盖要写 `pg_catalog.numeric`**：`ease` / `interval_hours` 是 numeric 列，
+  只写 `db_type: numeric` 不生效，生成出来仍是 `pgtype.Numeric`，Go 侧没法直接做算术。
+
+### M3 落地要点（2026-09-21）
+
+- **数学与打印同源**：`randx.Derive(seed, i)` 派生逐题种子，中途增删题目不会让其余题目漂移，
+  所以 `GET /practice/math/preview?template=&count=&seed=` 与打印中心能逐题对上。
+- **答案与题面分列**：`session_items` 拆 `question_snapshot`（可下发）与 `answer_key`（永不下发），
+  任何读接口都不返回答案；题目作答后才回传正确答案，供「答错看正确答案」。
+- **主观项不污染客观正确率**：描红 / 跟读的 `is_correct` 为 `null`，不写 `answer_logs`、不动掌握度，
+  由 `POST /practice/session/{id}/confirm` 的家长评分确认（§4.11）。
+- **跨模块只走 service 接口**：practice → mastery（判分后调状态机）、practice → content（组卷素材
+  `LoadMaterials` 批量装载避免 N+1）、practice/mastery → children（`EnsureOwned` 归属校验）。
+
+**验收结果**（`server/tmp/smoke_m3.py`，71 项全通过）
+
+- 同 seed 两次预览题目完全一致、换 seed 不同；
+- 数学会话答对 → 掌握度回带、答错 → 10 分钟后复现且进错题本、重复作答 409；
+- 语文/英语/数学三科各能完整走完一次会话；
+- 家长打分后客观正确率不变；描红题 `is_correct` 为 `null`；
+- 越权 404、参数非法 422、评分越界 422。
 
 ## 下一步
 
-**M3 练习引擎**开工要点：
+**M4 评价与报表**开工要点：
 
-1. `practice` 模块：`GET /practice/today`（复习队列 + 错题优先 + 新学 + 专项）、
-   `POST /practice/session`、`/answer`、`/finish`、`/confirm`。
-2. `mastery` 模块：简化 SM-2（`level 0–5`、`ease`、`interval_hours`）、错题本、难度自适应升降档。
-3. 数学题走 `math_templates` + 确定性 seed 参数化生成，与打印共用同一套题面数据。
-4. `answer_logs` 不分区（M4 再评估）；会话结束与家长补录在 service 层显式事务。
-5. 孩子端可见性：`status='published' AND suitable`，M2 已把字段备好。
+1. `report` 模块：`GET /reports/{childId}/overview`、`/trend`、`/subject/{subject}`、`/suggestions`、
+   `/pace?days=90`（标准基准线 vs 实际：双曲线、偏差、重复次数、效率趋势）。
+2. 日汇总 worker 接管 `daily_stats`（M3 目前是会话结束时同步增量更新），补齐
+   `planned_new` / `cum_planned` / `cum_actual` / `deviation_days` 四列。
+3. 多孩对比 `GET /reports/compare?childIds=a,b&align=session|calendar`，按学习日对齐、只并列不排名。
+4. 星级、成就、成长树（`badges` / `child_badges` 表已在设计里，M4 建）。
+5. `require_parent_confirm` 开关真正生效：开启后当日徽章需家长点「确认完成」才点亮。
 
-**M2 遗留（不阻塞 M3）**：
+**M3 遗留（不阻塞 M4）**：
+
+| # | 事项 | 说明 |
+| --- | --- | --- |
+| 1 | 故事未进练习 | `practice_assignments` 已建但故事知识点缺 `questions`/`discussion`，亲子朗读走 M4 |
+| 2 | 数学只有 14 套模板 | 覆盖 M1–M5 五档；几何、认识钟表等题型待补 |
+| 3 | 难度自适应偏保守 | 只按最近 3/5 次作答升降档，未结合阶段上限与历史掌握曲线 |
+| 4 | `daily_stats` 四项节奏列 | `planned_new`/`cum_*`/`deviation_days` 恒为 0，M4 worker 补 |
+| 5 | 会话过期清理 | `status='expired'` 目前无人置位，活跃会话跨天会一直挂着 |
+
+**M2 遗留（仍未处理，不阻塞 M4）**：
 
 | # | 事项 | 说明 |
 | --- | --- | --- |
