@@ -63,6 +63,34 @@
   不必二选一。
 - `.gitignore` 已追加 `tools/sqlc` 规则（对 `*.exe` 而言冗余，但无害，保留）。
 
+## sqlc 实际落地方式（2026-09-21，M2 实证）
+
+- 生成物落在 **`internal/dbgen`**（不是 feature 子包），生成代码**入库**，构建不依赖 sqlc 二进制。
+  重生成：`cd server && ./tools/sqlc.exe generate`。
+- `sqlc.yaml` 必须写 `sql_package: "pgx/v5"`：默认生成 `database/sql` 版 DBTX，`pgxpool.Pool` 满足不了。
+- `schema` 只列 `migrations/*.up.sql`；把整个目录丢进去会被 down 脚本的 `DROP` 打乱解析。
+- yaml 注释里不要出现冒号（`mapping values are not allowed in this context`）。
+- **批量写入不走 sqlc**：生成的是单行语句，1.9 万行会多几个数量级往返；COPY 又带不了
+  `ON CONFLICT`。用 `internal/feature/content/bulk.go` 的多行 upsert（200 行/语句）+
+  冲突键去重（同批次同键会触发 SQLSTATE 21000）。
+- 读查询（列表/详情/审核）走 sqlc；M1 的 auth / children 仍手写 pgx，不动。
+
+## M2 已交付（内容底座，2026-09-21）
+
+- 表：knowledge_points / hanzi / hanzi_words / en_words / en_sentences / stories /
+  story_pairs / videos / math_templates / content_review / curriculum_plan（迁移 0003）。
+- 导入量：阶段 39、汉字 8103（6864 带笔顺）、组词 29199、英语词 1802、故事 18908、
+  双语配对 830、审核队列 18908、每孩基准线 9905 条。`cmd/importer` 幂等可重跑
+  （`-only stages|hanzi|words|stories|plans` 跑单步，`-data` 指数据目录）。
+- 内容即发布策略：汉字/组词/英语词（自有管线）→ `published`；故事（采集）→ `pending`
+  + `content_review`，家长审核通过才 `published`；`suitable=false` 的孩子端默认屏蔽。
+- 端点：`/content/{stages,hanzi,hanzi/{idOrChar},words,stories,stories/{id},stories/{id}/pair}`、
+  `/review/queue`、`/review/{id}/approve|reject`、`/review/batch`。列表响应带
+  `meta.page{offset,limit,total}`（`response.JSONPaged`）。
+- 冒烟脚本 `server/tmp/smoke_m2.py`（36 项，对库内状态不敏感，可反复重跑）。
+- **本地起服务务必确认老进程已死**：老 api.exe 占着 18080 时新进程会 bind 失败，
+  但 curl 仍然 200（打的是旧二进制）。用 `tasklist` 找 PID + `taskkill /F /PID`。
+
 ## M1 已交付（认证 + 孩子档案）
 
 - 端点全在 `/api/v1`：`/auth/{register,login,refresh,logout,me,pin,qrcode/*}`、`/children[/{id}]`。
