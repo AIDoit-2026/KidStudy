@@ -32,17 +32,26 @@ type ContentProvider interface {
 	ListMathTemplates(ctx context.Context) ([]content.MathTemplateView, error)
 }
 
+// BadgeAwarder 在会话结算后评测成就，由 report.Service 实现。
+//
+// 只约定「回授予数量」这一个最小契约：practice 不需要知道徽章长什么样，
+// 也就不必 import report，跨模块依赖保持单向（report 不认识 practice）。
+type BadgeAwarder interface {
+	AwardChild(ctx context.Context, childID uuid.UUID) (int, error)
+}
+
 // Service 承载今日编排、组卷、判分与结算。不 import net/http。
 type Service struct {
 	repo    *Repository
 	mastery *mastery.Service
 	content ContentProvider
+	awarder BadgeAwarder
 	log     *slog.Logger
 }
 
-// NewService 构造练习服务。
-func NewService(repo *Repository, masterySvc *mastery.Service, contentSvc ContentProvider, log *slog.Logger) *Service {
-	return &Service{repo: repo, mastery: masterySvc, content: contentSvc, log: log}
+// NewService 构造练习服务。awarder 可以为 nil（不评测成就）。
+func NewService(repo *Repository, masterySvc *mastery.Service, contentSvc ContentProvider, awarder BadgeAwarder, log *slog.Logger) *Service {
+	return &Service{repo: repo, mastery: masterySvc, content: contentSvc, awarder: awarder, log: log}
 }
 
 // ------------------------------------------------------------------ 今日编排
@@ -452,7 +461,9 @@ func (s *Service) Finish(ctx context.Context, childID, sessionID uuid.UUID) (Ses
 			return SessionSummary{}, apperr.Internal(err)
 		}
 	}
-	if len(perSubject) == 0 && total > 0 {
+	// 合计行（subject_code=''）始终写：M4 的报表趋势读的就是它，
+	// 只在「没有分学科」时才写会让大多数日子的合计行缺失。
+	if total > 0 {
 		if err := repoTx.UpsertDailyStat(ctx, childID, dayStart, "", duration, total, correct, 0, stars, newToday); err != nil {
 			return SessionSummary{}, apperr.Internal(err)
 		}
@@ -460,6 +471,16 @@ func (s *Service) Finish(ctx context.Context, childID, sessionID uuid.UUID) (Ses
 
 	if err := tx.Commit(ctx); err != nil {
 		return SessionSummary{}, apperr.Internal(err)
+	}
+
+	// 结算之后评测成就：孩子刚拿到的徽章要立刻能看到，不必等夜里的 worker。
+	// 失败只记日志 —— 徽章是激励，不该因为一次评测异常把整次结算判成失败。
+	if s.awarder != nil {
+		if n, err := s.awarder.AwardChild(ctx, childID); err != nil {
+			s.log.Warn("成就评测失败，不影响结算", "child_id", childID, "error", err)
+		} else if n > 0 {
+			s.log.Info("会话结算后授予成就", "child_id", childID, "granted", n)
+		}
 	}
 	return summaryOf(updated, accuracy), nil
 }

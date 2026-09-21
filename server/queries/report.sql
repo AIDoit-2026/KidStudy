@@ -241,11 +241,30 @@ WHERE a.child_id = sqlc.arg(child_id)
 GROUP BY 1
 ORDER BY 1;
 
+-- 逐日学习时长（对比里的「每日时长/学习天数」）
+-- name: ReportDailyDuration :many
+SELECT
+    (COALESCE(s.ended_at, s.started_at) AT TIME ZONE 'Asia/Shanghai')::date AS stat_date,
+    COALESCE(sum(s.duration_sec), 0)::bigint AS duration_sec
+FROM learning_sessions s
+WHERE s.child_id = sqlc.arg(child_id)
+  AND s.status = 'finished'
+GROUP BY 1
+ORDER BY 1;
+
 -- 第一个学习日（对齐用的起点）
 -- name: ReportFirstStudyDate :one
 SELECT COALESCE(min((m.first_learned_at AT TIME ZONE 'Asia/Shanghai')::date), '1970-01-01'::date)::date AS first_date
 FROM mastery_records m
 WHERE m.child_id = sqlc.arg(child_id) AND m.first_learned_at IS NOT NULL;
+
+-- 对比用的孩子基本信息；带 parent_id 过滤顺带完成归属校验（只会拿到自己的孩子）
+-- name: ReportChildrenInfo :many
+SELECT id, nickname, avatar_id, stage_code
+FROM children
+WHERE parent_id = sqlc.arg(parent_id)
+  AND id = ANY(sqlc.arg(child_ids)::uuid[])
+ORDER BY created_at;
 
 -- ---------------------------------------------------------------- 成就
 
@@ -303,21 +322,21 @@ LIMIT sqlc.arg(lim);
 
 -- 全量孩子（含活跃与已归档，归档孩子不铺新线但仍可重算历史）
 -- name: ListChildIDs :many
-SELECT id FROM children ORDER BY created_at;
+SELECT id, parent_id FROM children ORDER BY created_at;
 
 -- name: RollupPlannedForDate :one
 SELECT count(*)::bigint
 FROM curriculum_plan
 WHERE child_id = sqlc.arg(child_id)
   AND subject_code = sqlc.arg(subject_code)
-  AND planned_date = sqlc.arg(stat_date);
+  AND planned_date = sqlc.arg(stat_date)::date;
 
 -- name: RollupCumPlanned :one
 SELECT count(*)::bigint
 FROM curriculum_plan
 WHERE child_id = sqlc.arg(child_id)
   AND subject_code = sqlc.arg(subject_code)
-  AND planned_date <= sqlc.arg(stat_date);
+  AND planned_date <= sqlc.arg(stat_date)::date;
 
 -- name: RollupDailyMastered :one
 SELECT count(*)::bigint
@@ -326,7 +345,7 @@ JOIN knowledge_points k ON k.id = m.kp_id
 WHERE m.child_id = sqlc.arg(child_id)
   AND k.subject_code = sqlc.arg(subject_code)
   AND m.mastered_at IS NOT NULL
-  AND (m.mastered_at AT TIME ZONE 'Asia/Shanghai')::date = sqlc.arg(stat_date);
+  AND (m.mastered_at AT TIME ZONE 'Asia/Shanghai')::date = sqlc.arg(stat_date)::date;
 
 -- name: RollupCumMastered :one
 SELECT count(*)::bigint
@@ -335,7 +354,7 @@ JOIN knowledge_points k ON k.id = m.kp_id
 WHERE m.child_id = sqlc.arg(child_id)
   AND k.subject_code = sqlc.arg(subject_code)
   AND m.mastered_at IS NOT NULL
-  AND (m.mastered_at AT TIME ZONE 'Asia/Shanghai')::date <= sqlc.arg(stat_date);
+  AND (m.mastered_at AT TIME ZONE 'Asia/Shanghai')::date <= sqlc.arg(stat_date)::date;
 
 -- 当日「重复练习」量：当天作答的题里，知识点在当天之前就已经学过（首学日 < 当天）
 -- name: RollupRepeatCount :one
@@ -344,9 +363,9 @@ FROM answer_logs a
 JOIN mastery_records m ON m.child_id = a.child_id AND m.kp_id = a.kp_id
 WHERE a.child_id = sqlc.arg(child_id)
   AND a.subject_code = sqlc.arg(subject_code)
-  AND (a.created_at AT TIME ZONE 'Asia/Shanghai')::date = sqlc.arg(stat_date)
+  AND (a.created_at AT TIME ZONE 'Asia/Shanghai')::date = sqlc.arg(stat_date)::date
   AND m.first_learned_at IS NOT NULL
-  AND (m.first_learned_at AT TIME ZONE 'Asia/Shanghai')::date < sqlc.arg(stat_date);
+  AND (m.first_learned_at AT TIME ZONE 'Asia/Shanghai')::date < sqlc.arg(stat_date)::date;
 
 -- 当日该学科的作答与正确数（判达标用，避免与 M3 的增量口径互相打架）
 -- name: RollupDailyAnswers :one
@@ -356,7 +375,7 @@ SELECT
 FROM answer_logs
 WHERE child_id = sqlc.arg(child_id)
   AND subject_code = sqlc.arg(subject_code)
-  AND (created_at AT TIME ZONE 'Asia/Shanghai')::date = sqlc.arg(stat_date);
+  AND (created_at AT TIME ZONE 'Asia/Shanghai')::date = sqlc.arg(stat_date)::date;
 
 -- 当日是否有家长确认（completed_by 为 parent / mixed 即视为家长参与过确认）
 -- name: RollupParentConfirmed :one
@@ -364,7 +383,7 @@ SELECT EXISTS (
     SELECT 1 FROM learning_sessions
     WHERE child_id = sqlc.arg(child_id)
       AND completed_by IN ('parent', 'mixed')
-      AND (COALESCE(ended_at, started_at) AT TIME ZONE 'Asia/Shanghai')::date = sqlc.arg(stat_date)
+      AND (COALESCE(ended_at, started_at) AT TIME ZONE 'Asia/Shanghai')::date = sqlc.arg(stat_date)::date
 )::boolean AS confirmed;
 
 -- 写回汇总行：只覆盖「计划/节奏/达标」这几列，时长与题量仍以会话增量为准。
@@ -373,7 +392,7 @@ INSERT INTO daily_stats (
     child_id, stat_date, subject_code, new_mastered, planned_new, actual_new, repeat_count,
     cum_planned, cum_actual, deviation_days, passed, parent_confirmed, updated_at)
 VALUES (
-    sqlc.arg(child_id), sqlc.arg(stat_date), sqlc.arg(subject_code),
+    sqlc.arg(child_id), sqlc.arg(stat_date)::date, sqlc.arg(subject_code),
     sqlc.arg(new_mastered), sqlc.arg(planned_new), sqlc.arg(actual_new), sqlc.arg(repeat_count),
     sqlc.arg(cum_planned), sqlc.arg(cum_actual), sqlc.arg(deviation_days),
     sqlc.arg(passed), sqlc.arg(parent_confirmed), now())
@@ -390,6 +409,14 @@ ON CONFLICT (child_id, stat_date, subject_code) DO UPDATE SET
     updated_at       = now();
 
 -- ---------------------------------------------------------------- 家长设置
+
+-- 家长设置的完整视图（含 compare_children）；parent 模块专用，
+-- 不动 learning.sql 里 practice 已经在用的 GetParentSettings，避免连带影响。
+-- name: ParentSettingsFull :one
+SELECT parent_id, daily_limit_min, session_limit_min, rest_interval_min,
+       require_parent_confirm, pace_mode, compare_children
+FROM parent_settings
+WHERE parent_id = $1;
 
 -- name: UpsertParentSettings :one
 INSERT INTO parent_settings (

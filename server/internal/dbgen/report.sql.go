@@ -190,24 +190,29 @@ func (q *Queries) ListChildBadges(ctx context.Context, childID uuid.UUID) ([]Lis
 
 const listChildIDs = `-- name: ListChildIDs :many
 
-SELECT id FROM children ORDER BY created_at
+SELECT id, parent_id FROM children ORDER BY created_at
 `
+
+type ListChildIDsRow struct {
+	ID       uuid.UUID `json:"id"`
+	ParentID uuid.UUID `json:"parent_id"`
+}
 
 // ---------------------------------------------------------------- 日汇总 worker
 // 全量孩子（含活跃与已归档，归档孩子不铺新线但仍可重算历史）
-func (q *Queries) ListChildIDs(ctx context.Context) ([]uuid.UUID, error) {
+func (q *Queries) ListChildIDs(ctx context.Context) ([]ListChildIDsRow, error) {
 	rows, err := q.db.Query(ctx, listChildIDs)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []uuid.UUID{}
+	items := []ListChildIDsRow{}
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i ListChildIDsRow
+		if err := rows.Scan(&i.ID, &i.ParentID); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -251,6 +256,88 @@ func (q *Queries) ListPassedDaysDesc(ctx context.Context, arg ListPassedDaysDesc
 	return items, nil
 }
 
+const parentSettingsFull = `-- name: ParentSettingsFull :one
+
+SELECT parent_id, daily_limit_min, session_limit_min, rest_interval_min,
+       require_parent_confirm, pace_mode, compare_children
+FROM parent_settings
+WHERE parent_id = $1
+`
+
+type ParentSettingsFullRow struct {
+	ParentID             uuid.UUID `json:"parent_id"`
+	DailyLimitMin        int32     `json:"daily_limit_min"`
+	SessionLimitMin      int32     `json:"session_limit_min"`
+	RestIntervalMin      int32     `json:"rest_interval_min"`
+	RequireParentConfirm bool      `json:"require_parent_confirm"`
+	PaceMode             string    `json:"pace_mode"`
+	CompareChildren      bool      `json:"compare_children"`
+}
+
+// ---------------------------------------------------------------- 家长设置
+// 家长设置的完整视图（含 compare_children）；parent 模块专用，
+// 不动 learning.sql 里 practice 已经在用的 GetParentSettings，避免连带影响。
+func (q *Queries) ParentSettingsFull(ctx context.Context, parentID uuid.UUID) (ParentSettingsFullRow, error) {
+	row := q.db.QueryRow(ctx, parentSettingsFull, parentID)
+	var i ParentSettingsFullRow
+	err := row.Scan(
+		&i.ParentID,
+		&i.DailyLimitMin,
+		&i.SessionLimitMin,
+		&i.RestIntervalMin,
+		&i.RequireParentConfirm,
+		&i.PaceMode,
+		&i.CompareChildren,
+	)
+	return i, err
+}
+
+const reportChildrenInfo = `-- name: ReportChildrenInfo :many
+SELECT id, nickname, avatar_id, stage_code
+FROM children
+WHERE parent_id = $1
+  AND id = ANY($2::uuid[])
+ORDER BY created_at
+`
+
+type ReportChildrenInfoParams struct {
+	ParentID uuid.UUID   `json:"parent_id"`
+	ChildIds []uuid.UUID `json:"child_ids"`
+}
+
+type ReportChildrenInfoRow struct {
+	ID        uuid.UUID   `json:"id"`
+	Nickname  string      `json:"nickname"`
+	AvatarID  string      `json:"avatar_id"`
+	StageCode pgtype.Text `json:"stage_code"`
+}
+
+// 对比用的孩子基本信息；带 parent_id 过滤顺带完成归属校验（只会拿到自己的孩子）
+func (q *Queries) ReportChildrenInfo(ctx context.Context, arg ReportChildrenInfoParams) ([]ReportChildrenInfoRow, error) {
+	rows, err := q.db.Query(ctx, reportChildrenInfo, arg.ParentID, arg.ChildIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportChildrenInfoRow{}
+	for rows.Next() {
+		var i ReportChildrenInfoRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Nickname,
+			&i.AvatarID,
+			&i.StageCode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const reportDailyAnswers = `-- name: ReportDailyAnswers :many
 SELECT
     (a.created_at AT TIME ZONE 'Asia/Shanghai')::date AS stat_date,
@@ -285,6 +372,43 @@ func (q *Queries) ReportDailyAnswers(ctx context.Context, arg ReportDailyAnswers
 	for rows.Next() {
 		var i ReportDailyAnswersRow
 		if err := rows.Scan(&i.StatDate, &i.Attempts, &i.CorrectCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const reportDailyDuration = `-- name: ReportDailyDuration :many
+SELECT
+    (COALESCE(s.ended_at, s.started_at) AT TIME ZONE 'Asia/Shanghai')::date AS stat_date,
+    COALESCE(sum(s.duration_sec), 0)::bigint AS duration_sec
+FROM learning_sessions s
+WHERE s.child_id = $1
+  AND s.status = 'finished'
+GROUP BY 1
+ORDER BY 1
+`
+
+type ReportDailyDurationRow struct {
+	StatDate    pgtype.Date `json:"stat_date"`
+	DurationSec int64       `json:"duration_sec"`
+}
+
+// 逐日学习时长（对比里的「每日时长/学习天数」）
+func (q *Queries) ReportDailyDuration(ctx context.Context, childID uuid.UUID) ([]ReportDailyDurationRow, error) {
+	rows, err := q.db.Query(ctx, reportDailyDuration, childID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportDailyDurationRow{}
+	for rows.Next() {
+		var i ReportDailyDurationRow
+		if err := rows.Scan(&i.StatDate, &i.DurationSec); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1059,13 +1183,13 @@ JOIN knowledge_points k ON k.id = m.kp_id
 WHERE m.child_id = $1
   AND k.subject_code = $2
   AND m.mastered_at IS NOT NULL
-  AND (m.mastered_at AT TIME ZONE 'Asia/Shanghai')::date <= $3
+  AND (m.mastered_at AT TIME ZONE 'Asia/Shanghai')::date <= $3::date
 `
 
 type RollupCumMasteredParams struct {
-	ChildID     uuid.UUID          `json:"child_id"`
-	SubjectCode string             `json:"subject_code"`
-	StatDate    pgtype.Timestamptz `json:"stat_date"`
+	ChildID     uuid.UUID   `json:"child_id"`
+	SubjectCode string      `json:"subject_code"`
+	StatDate    pgtype.Date `json:"stat_date"`
 }
 
 func (q *Queries) RollupCumMastered(ctx context.Context, arg RollupCumMasteredParams) (int64, error) {
@@ -1080,7 +1204,7 @@ SELECT count(*)::bigint
 FROM curriculum_plan
 WHERE child_id = $1
   AND subject_code = $2
-  AND planned_date <= $3
+  AND planned_date <= $3::date
 `
 
 type RollupCumPlannedParams struct {
@@ -1103,13 +1227,13 @@ SELECT
 FROM answer_logs
 WHERE child_id = $1
   AND subject_code = $2
-  AND (created_at AT TIME ZONE 'Asia/Shanghai')::date = $3
+  AND (created_at AT TIME ZONE 'Asia/Shanghai')::date = $3::date
 `
 
 type RollupDailyAnswersParams struct {
-	ChildID     uuid.UUID          `json:"child_id"`
-	SubjectCode string             `json:"subject_code"`
-	StatDate    pgtype.Timestamptz `json:"stat_date"`
+	ChildID     uuid.UUID   `json:"child_id"`
+	SubjectCode string      `json:"subject_code"`
+	StatDate    pgtype.Date `json:"stat_date"`
 }
 
 type RollupDailyAnswersRow struct {
@@ -1132,13 +1256,13 @@ JOIN knowledge_points k ON k.id = m.kp_id
 WHERE m.child_id = $1
   AND k.subject_code = $2
   AND m.mastered_at IS NOT NULL
-  AND (m.mastered_at AT TIME ZONE 'Asia/Shanghai')::date = $3
+  AND (m.mastered_at AT TIME ZONE 'Asia/Shanghai')::date = $3::date
 `
 
 type RollupDailyMasteredParams struct {
-	ChildID     uuid.UUID          `json:"child_id"`
-	SubjectCode string             `json:"subject_code"`
-	StatDate    pgtype.Timestamptz `json:"stat_date"`
+	ChildID     uuid.UUID   `json:"child_id"`
+	SubjectCode string      `json:"subject_code"`
+	StatDate    pgtype.Date `json:"stat_date"`
 }
 
 func (q *Queries) RollupDailyMastered(ctx context.Context, arg RollupDailyMasteredParams) (int64, error) {
@@ -1153,13 +1277,13 @@ SELECT EXISTS (
     SELECT 1 FROM learning_sessions
     WHERE child_id = $1
       AND completed_by IN ('parent', 'mixed')
-      AND (COALESCE(ended_at, started_at) AT TIME ZONE 'Asia/Shanghai')::date = $2
+      AND (COALESCE(ended_at, started_at) AT TIME ZONE 'Asia/Shanghai')::date = $2::date
 )::boolean AS confirmed
 `
 
 type RollupParentConfirmedParams struct {
-	ChildID  uuid.UUID          `json:"child_id"`
-	StatDate pgtype.Timestamptz `json:"stat_date"`
+	ChildID  uuid.UUID   `json:"child_id"`
+	StatDate pgtype.Date `json:"stat_date"`
 }
 
 // 当日是否有家长确认（completed_by 为 parent / mixed 即视为家长参与过确认）
@@ -1175,7 +1299,7 @@ SELECT count(*)::bigint
 FROM curriculum_plan
 WHERE child_id = $1
   AND subject_code = $2
-  AND planned_date = $3
+  AND planned_date = $3::date
 `
 
 type RollupPlannedForDateParams struct {
@@ -1197,15 +1321,15 @@ FROM answer_logs a
 JOIN mastery_records m ON m.child_id = a.child_id AND m.kp_id = a.kp_id
 WHERE a.child_id = $1
   AND a.subject_code = $2
-  AND (a.created_at AT TIME ZONE 'Asia/Shanghai')::date = $3
+  AND (a.created_at AT TIME ZONE 'Asia/Shanghai')::date = $3::date
   AND m.first_learned_at IS NOT NULL
-  AND (m.first_learned_at AT TIME ZONE 'Asia/Shanghai')::date < $3
+  AND (m.first_learned_at AT TIME ZONE 'Asia/Shanghai')::date < $3::date
 `
 
 type RollupRepeatCountParams struct {
-	ChildID     uuid.UUID          `json:"child_id"`
-	SubjectCode string             `json:"subject_code"`
-	StatDate    pgtype.Timestamptz `json:"stat_date"`
+	ChildID     uuid.UUID   `json:"child_id"`
+	SubjectCode string      `json:"subject_code"`
+	StatDate    pgtype.Date `json:"stat_date"`
 }
 
 // 当日「重复练习」量：当天作答的题里，知识点在当天之前就已经学过（首学日 < 当天）
@@ -1221,7 +1345,7 @@ INSERT INTO daily_stats (
     child_id, stat_date, subject_code, new_mastered, planned_new, actual_new, repeat_count,
     cum_planned, cum_actual, deviation_days, passed, parent_confirmed, updated_at)
 VALUES (
-    $1, $2, $3,
+    $1, $2::date, $3,
     $4, $5, $6, $7,
     $8, $9, $10,
     $11, $12, now())
@@ -1273,7 +1397,6 @@ func (q *Queries) UpsertDailyRollup(ctx context.Context, arg UpsertDailyRollupPa
 }
 
 const upsertParentSettings = `-- name: UpsertParentSettings :one
-
 INSERT INTO parent_settings (
     parent_id, daily_limit_min, session_limit_min, rest_interval_min,
     require_parent_confirm, pace_mode, compare_children, updated_at)
@@ -1313,7 +1436,6 @@ type UpsertParentSettingsRow struct {
 	CompareChildren      bool      `json:"compare_children"`
 }
 
-// ---------------------------------------------------------------- 家长设置
 func (q *Queries) UpsertParentSettings(ctx context.Context, arg UpsertParentSettingsParams) (UpsertParentSettingsRow, error) {
 	row := q.db.QueryRow(ctx, upsertParentSettings,
 		arg.ParentID,

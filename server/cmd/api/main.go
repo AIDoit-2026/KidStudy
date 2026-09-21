@@ -20,6 +20,7 @@ import (
 	"kidstudy/internal/feature/content"
 	"kidstudy/internal/feature/mastery"
 	"kidstudy/internal/feature/practice"
+	"kidstudy/internal/feature/report"
 	"kidstudy/internal/feature/review"
 	"kidstudy/internal/feature/system"
 	platformauth "kidstudy/internal/platform/auth"
@@ -59,8 +60,13 @@ func registerFeatures(r chi.Router, cfg config.Config, log *slog.Logger, db *pos
 	masterySvc := mastery.NewService(mastery.NewRepository(db.Pool()), log)
 	masteryH := mastery.NewHandler(masterySvc, childrenSvc, log)
 
+	// report 不依赖 practice，但 practice 结算后要调它的成就评测，
+	// 所以先构造 report，再把 reportSvc 当作 BadgeAwarder 注入 practice。
+	reportSvc := report.NewService(report.NewRepository(db.Pool()), log)
+	reportH := report.NewHandler(reportSvc, childrenSvc, log)
+
 	practiceH := practice.NewHandler(
-		practice.NewService(practice.NewRepository(db.Pool()), masterySvc, contentSvc, log),
+		practice.NewService(practice.NewRepository(db.Pool()), masterySvc, contentSvc, reportSvc, log),
 		childrenSvc,
 		log,
 	)
@@ -76,6 +82,7 @@ func registerFeatures(r chi.Router, cfg config.Config, log *slog.Logger, db *pos
 			reviewH.Register(r)
 			masteryH.Register(r)
 			practiceH.Register(r)
+			reportH.Register(r)
 		})
 	})
 }

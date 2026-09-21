@@ -62,7 +62,7 @@ type Querier interface {
 	ListChildBadges(ctx context.Context, childID uuid.UUID) ([]ListChildBadgesRow, error)
 	// ---------------------------------------------------------------- 日汇总 worker
 	// 全量孩子（含活跃与已归档，归档孩子不铺新线但仍可重算历史）
-	ListChildIDs(ctx context.Context) ([]uuid.UUID, error)
+	ListChildIDs(ctx context.Context) ([]ListChildIDsRow, error)
 	ListChildrenForPlan(ctx context.Context) ([]ListChildrenForPlanRow, error)
 	// 到期复习：逾期越久越靠前，同逾期程度下掌握度低的优先（§4.2 步骤 2）
 	ListDueReviews(ctx context.Context, arg ListDueReviewsParams) ([]ListDueReviewsRow, error)
@@ -99,12 +99,20 @@ type Querier interface {
 	LoadMathTemplatesByKPs(ctx context.Context, kpIds []uuid.UUID) ([]LoadMathTemplatesByKPsRow, error)
 	LoadStoriesByKPs(ctx context.Context, kpIds []uuid.UUID) ([]LoadStoriesByKPsRow, error)
 	MarkAssignmentDone(ctx context.Context, arg MarkAssignmentDoneParams) error
+	// ---------------------------------------------------------------- 家长设置
+	// 家长设置的完整视图（含 compare_children）；parent 模块专用，
+	// 不动 learning.sql 里 practice 已经在用的 GetParentSettings，避免连带影响。
+	ParentSettingsFull(ctx context.Context, parentID uuid.UUID) (ParentSettingsFullRow, error)
 	PublishStory(ctx context.Context, id uuid.UUID) (int64, error)
 	// 难度自适应用：取最近 n 次作答的正确与否与用时（§4.2「连 3 次正确率<60% 降档」）
 	RecentAnswers(ctx context.Context, arg RecentAnswersParams) ([]RecentAnswersRow, error)
 	RejectStory(ctx context.Context, id uuid.UUID) (int64, error)
+	// 对比用的孩子基本信息；带 parent_id 过滤顺带完成归属校验（只会拿到自己的孩子）
+	ReportChildrenInfo(ctx context.Context, arg ReportChildrenInfoParams) ([]ReportChildrenInfoRow, error)
 	// 逐日作答数（对比里的正确率/重复次数按天聚合）
 	ReportDailyAnswers(ctx context.Context, arg ReportDailyAnswersParams) ([]ReportDailyAnswersRow, error)
+	// 逐日学习时长（对比里的「每日时长/学习天数」）
+	ReportDailyDuration(ctx context.Context, childID uuid.UUID) ([]ReportDailyDurationRow, error)
 	// ---------------------------------------------------------------- 多孩对比（§4.10）
 	// 逐日新掌握数（用于按「学习日序号」或自然日累加）
 	ReportDailyMastered(ctx context.Context, arg ReportDailyMasteredParams) ([]ReportDailyMasteredRow, error)
@@ -172,7 +180,6 @@ type Querier interface {
 	// 增量累加，会话结束时调用一次（量小，不进 worker）
 	UpsertDailyStat(ctx context.Context, arg UpsertDailyStatParams) (UpsertDailyStatRow, error)
 	UpsertMastery(ctx context.Context, arg UpsertMasteryParams) (UpsertMasteryRow, error)
-	// ---------------------------------------------------------------- 家长设置
 	UpsertParentSettings(ctx context.Context, arg UpsertParentSettingsParams) (UpsertParentSettingsRow, error)
 	UpsertStage(ctx context.Context, arg UpsertStageParams) error
 	UpsertWrongEntry(ctx context.Context, arg UpsertWrongEntryParams) (UpsertWrongEntryRow, error)
