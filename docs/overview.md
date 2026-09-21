@@ -85,27 +85,43 @@
 | --- | --- | --- |
 | **M0 基础设施** | ✅ 已完成 | Go 骨架、配置集中校验（fail-fast）、`apperr` 类型化错误、slog JSON 日志、请求 ID、6 层中间件链、连接池、迁移框架（`-migrate` / `-rollback`）、`/health` `/ready`、优雅停机 |
 | **M1 认证与孩子档案** | ✅ 已完成 | 邀请码注册、登录与失败锁定、Refresh 轮换与撤销、PIN 二次校验、扫码登录（二维码 60s + SSE 四事件 + 一次性兑换码）、孩子档案 CRUD（软归档 + 家长独占） |
-| **M2 内容底座** | ⏳ 待开工 | 内容表与 importer、笔顺数据、检索接口、审核队列、`curriculum_plan` 基准线生成 |
+| **M2 内容底座** | ✅ 已完成 | 内容域 11 张表、sqlc 生成查询、`cmd/importer` 一次性导入（汉字 8103 / 组词 29199 / 英语词 1802 / 故事 18908 / 双语配对 830 / 笔顺 6864 字）、内容检索 7 个端点、审核队列（18908 条 pending）+ 批量上线、每孩 `curriculum_plan` 基准线 9905 条 |
 
-### 连接层定 sqlc（2026-09-20 晚拍板）
+### 连接层定 sqlc（2026-09-20 晚拍板，2026-09-21 落地）
 
 - 工具：`tools/sqlc.exe`（**v1.31.1**，官方 Release 的 Windows amd64；被 `*.exe` 规则忽略，**不入库**，重装时重新下载同版本即可）。
-- 已验证：能完整解析 `migrations/0001+0002` 的 DDL（uuid / jsonb / 部分索引 / `COMMENT ON` 均识别），
-  生成代码正确处理可空列与 jsonb，并把表/列的 COMMENT 带进 Go 注释。
-- 待补依赖：`github.com/sqlc-dev/pqtype`（`login_audit` 的 inet 列会用到）。
-- **明确不用 ORM**：批量导入（8103 字 / 48000 组词 / 18913 故事）与复杂查询（今日编排、SM-2、多孩对比）
-  是本项目主负载，恰是 ORM 短板；且内容资产先于代码存在，SQL-first 比 Code-first 更契合。
-- M1 已验收的手写 pgx 仓库**不动**。
+- 已落地：`server/sqlc.yaml` 把 `migrations/*.up.sql` 当 schema、`queries/content.sql` 当查询，
+  生成到 **`internal/dbgen`**；配置 `sql_package: pgx/v5`，`pgxpool.Pool` 直接满足生成的 DBTX 接口，
+  不需要 `database/sql` 适配层，也不需要 `pqtype`（inet 列不再被引用）。
+- **生成代码入库**：构建不再依赖 sqlc 二进制，重生成用 `cd server && ./tools/sqlc.exe generate`。
+- **批量写入不走 sqlc**：sqlc 只生成单行语句，1.9 万篇故事按单行写会多几个数量级的往返，
+  COPY 又带不了 `ON CONFLICT`；因此导入用 `internal/feature/content/bulk.go` 的多行 upsert
+  （200 行一条语句 + 冲突键去重），这是唯一一处手写 SQL 的例外。
+- **明确不用 ORM**：批量导入与复杂查询是本项目主负载，恰是 ORM 短板；内容资产先于代码存在，SQL-first 更契合。
+- M1 已验收的手写 pgx 仓库**不动**（auth / children 仍手写）。
 
 ## 下一步
 
-**M2 内容底座**开工要点：
+**M3 练习引擎**开工要点：
 
-1. 在 `server/` 建 `sqlc.yaml`，`schema` 指向 `migrations/`，`queries/` 单独建目录按模块分文件，生成包输出到 `internal/feature/content/dbgen/`。
-2. 迁移 0003 建内容表：汉字（`hanzi`）、组词（`hanzi_words`）、英语词（`en_words`）、故事（`stories`）、双语配对（`story_pairs`）、阶段字典导入（`stages` 用 `var/raw/stages.json`）。
-3. `cmd/importer` 写一次性导入器，跑完核对字数：汉字 8103、组词约 48000、故事 18913、双语配对 831。
-4. 故事默认 `pending`，家长后台勾选才转 `published`。
-5. `curriculum_plan` 按标准节奏铺 Day 1…Day N 基准线（语文 6 字 / 数学 2 档 / 英语 5 词）。
+1. `practice` 模块：`GET /practice/today`（复习队列 + 错题优先 + 新学 + 专项）、
+   `POST /practice/session`、`/answer`、`/finish`、`/confirm`。
+2. `mastery` 模块：简化 SM-2（`level 0–5`、`ease`、`interval_hours`）、错题本、难度自适应升降档。
+3. 数学题走 `math_templates` + 确定性 seed 参数化生成，与打印共用同一套题面数据。
+4. `answer_logs` 不分区（M4 再评估）；会话结束与家长补录在 service 层显式事务。
+5. 孩子端可见性：`status='published' AND suitable`，M2 已把字段备好。
+
+**M2 遗留（不阻塞 M3）**：
+
+| # | 事项 | 说明 |
+| --- | --- | --- |
+| 1 | 组词总量 | 实采 **29,199** 条（8103 字平均 3.6 词，另有 2108 字无组词），不是早期估算的 48k |
+| 2 | 笔顺缺口 | **6864 / 8103** 字有 hanzi-writer 字形数据，其余 1239 字（多为 X 阶段生僻字）退化为静态字图 |
+| 3 | 双语配对 | **830** 组（源 831）：其中一组的中文篇正文与另一篇完全重复，去重后配对缺一侧 |
+| 4 | 重复正文 | 故事 18913 篇 → 入库 **18908**：5 篇正文哈希重复被合并 |
+| 5 | 英语分级 | `en_words.level_code` 是按「主题映射 + 词频均分」给的启发式分级，家长后台可调 |
+| 6 | 双语故事适宜性 | SleepyStory 的 1663 篇暂按站方筛选标记 `suitable=true`，未做不宜词二次判定 |
+| 7 | 故事题目 | `questions` / `discussion` 仍为空，留待 M3/M4 生成 |
 
 本地开发约定：**8080 被 Jenkins 占用，统一用 18080**；本机有代理，curl 本机服务必须加 `--noproxy '*'`；
 PostgreSQL 18.6 为 Automatic 服务，开机自启。
