@@ -34,14 +34,26 @@ func (s *Service) List(ctx context.Context, parentID uuid.UUID, includeArchived 
 
 // Get 取单个档案，越权与不存在都表现为 404。
 func (s *Service) Get(ctx context.Context, parentID, childID uuid.UUID) (ChildView, error) {
+	c, err := s.EnsureOwned(ctx, parentID, childID)
+	if err != nil {
+		return ChildView{}, err
+	}
+	return c.ToView(), nil
+}
+
+// EnsureOwned 校验「这个孩子属于这个家长」并返回领域对象。
+//
+// mastery / practice 需要在写掌握度与会话前先做归属校验，它们拿领域对象（而不是
+// 对外视图）才能取到 uuid 形态的 ID 与阶段码；越权一律 404，不泄露 ID 是否存在。
+func (s *Service) EnsureOwned(ctx context.Context, parentID, childID uuid.UUID) (Child, error) {
 	c, err := s.repo.Get(ctx, parentID, childID)
 	if err != nil {
 		if isNoRows(err) {
-			return ChildView{}, errNotFound
+			return Child{}, errNotFound
 		}
-		return ChildView{}, apperr.Internal(err)
+		return Child{}, apperr.Internal(err)
 	}
-	return c.ToView(), nil
+	return c, nil
 }
 
 // Create 新建档案。stage_code 给了就必须真实存在——M2 导入阶段字典前会一直返回 422。
