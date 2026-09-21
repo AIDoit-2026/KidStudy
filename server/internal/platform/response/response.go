@@ -13,9 +13,17 @@ import (
 	"kidstudy/internal/platform/requestctx"
 )
 
-// Meta 携带与请求相关的元信息。后续会补部分页字段。
+// Meta 携带与请求相关的元信息。
 type Meta struct {
 	RequestID string `json:"request_id"`
+	Page      *Page  `json:"page,omitempty"`
+}
+
+// Page 列表接口的分页元信息，与设计文档 §5 的约定一致。
+type Page struct {
+	Offset int   `json:"offset"`
+	Limit  int   `json:"limit"`
+	Total  int64 `json:"total"`
 }
 
 type successEnvelope struct {
@@ -39,6 +47,17 @@ func JSON(w http.ResponseWriter, r *http.Request, status int, data any) {
 	writeJSON(w, r, status, successEnvelope{
 		Data: data,
 		Meta: Meta{RequestID: requestctx.RequestIDFromContext(r.Context())},
+	})
+}
+
+// JSONPaged 写带分页元信息的成功响应（列表接口用）。
+func JSONPaged(w http.ResponseWriter, r *http.Request, status int, data any, p Page) {
+	writeJSON(w, r, status, successEnvelope{
+		Data: data,
+		Meta: Meta{
+			RequestID: requestctx.RequestIDFromContext(r.Context()),
+			Page:      &p,
+		},
 	})
 }
 

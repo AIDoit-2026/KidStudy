@@ -17,6 +17,8 @@ import (
 	"kidstudy/internal/config"
 	"kidstudy/internal/feature/auth"
 	"kidstudy/internal/feature/children"
+	"kidstudy/internal/feature/content"
+	"kidstudy/internal/feature/review"
 	"kidstudy/internal/feature/system"
 	platformauth "kidstudy/internal/platform/auth"
 	"kidstudy/internal/platform/logger"
@@ -45,6 +47,16 @@ func registerFeatures(r chi.Router, cfg config.Config, log *slog.Logger, db *pos
 		log,
 	)
 
+	contentH := content.NewHandler(
+		content.NewService(content.NewRepository(db.Pool()), log),
+		log,
+	)
+
+	reviewH := review.NewHandler(
+		review.NewService(review.NewRepository(db.Pool()), log),
+		log,
+	)
+
 	// 业务 API 统一走 /api/v1；健康检查留在根路径，供编排直接探活
 	r.Route("/api/v1", func(r chi.Router) {
 		authH.Register(r, requireAuth)
@@ -52,6 +64,8 @@ func registerFeatures(r chi.Router, cfg config.Config, log *slog.Logger, db *pos
 		r.Group(func(r chi.Router) {
 			r.Use(requireAuth)
 			childrenH.Register(r)
+			contentH.Register(r)
+			reviewH.Register(r)
 		})
 	})
 }
