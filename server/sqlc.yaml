@@ -1,0 +1,23 @@
+# sqlc 配置 —— SQL 是唯一事实来源，Go 数据访问代码由本工具生成。
+#
+# schema 只列 *.up.sql。回退脚本里有 DROP，混进来会让 sqlc 的解析顺序出错。
+version: "2"
+
+sql:
+  - engine: "postgresql"
+    schema:
+      - "migrations/0001_init.up.sql"
+      - "migrations/0002_qr_exchange.up.sql"
+      - "migrations/0003_content.up.sql"
+    queries: "queries"
+    gen:
+      go:
+        package: "dbgen"
+        out: "internal/feature/content/dbgen"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+        overrides:
+          - go_type: "github.com/google/uuid.UUID"
+            db_type: "uuid"
