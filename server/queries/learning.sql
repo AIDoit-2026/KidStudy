@@ -85,6 +85,7 @@ WHERE p.child_id = sqlc.arg(child_id)
   AND p.subject_code = sqlc.arg(subject_code)
   AND m.id IS NULL
   AND k.status = 'published'
+  AND (sqlc.arg(kind)::text = '' OR k.kind = sqlc.arg(kind)::text)
 ORDER BY p.planned_day_index, k.code
 LIMIT sqlc.arg(lim);
 
@@ -96,6 +97,7 @@ FROM knowledge_points k
 WHERE k.subject_code = sqlc.arg(subject_code)
   AND k.status = 'published'
   AND (sqlc.arg(stage_code)::text = '' OR k.stage_code = sqlc.arg(stage_code)::text)
+  AND (sqlc.arg(kind)::text = '' OR k.kind = sqlc.arg(kind)::text)
   AND NOT EXISTS (SELECT 1 FROM mastery_records m WHERE m.child_id = sqlc.arg(child_id) AND m.kp_id = k.id)
 ORDER BY k.stage_code, k.difficulty, k.code
 LIMIT sqlc.arg(lim);
@@ -134,7 +136,11 @@ VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (child_id, kp_id) DO UPDATE SET
     cleared_at          = EXCLUDED.cleared_at,
     consecutive_correct = EXCLUDED.consecutive_correct,
-    wrong_count         = wrong_book_entries.wrong_count + 1,
+    -- 只在「再次答错」时累加错误次数并重置入本时间；单纯移出错题本不该动这两个字段
+    wrong_count         = CASE WHEN EXCLUDED.cleared_at IS NULL
+                               THEN wrong_book_entries.wrong_count + 1
+                               ELSE wrong_book_entries.wrong_count END,
+    added_at            = CASE WHEN EXCLUDED.cleared_at IS NULL THEN now() ELSE wrong_book_entries.added_at END,
     updated_at          = now()
 RETURNING id, child_id, kp_id, added_at, cleared_at, consecutive_correct, wrong_count;
 
@@ -232,6 +238,14 @@ INSERT INTO answer_logs (child_id, session_id, item_id, kp_id, subject_code, que
                          is_correct, used_hint, elapsed_ms)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
 
+-- 难度自适应用：取最近 n 次作答的正确与否与用时（§4.2「连 3 次正确率<60% 降档」）
+-- name: RecentAnswers :many
+SELECT is_correct, elapsed_ms
+FROM answer_logs
+WHERE child_id = $1 AND kp_id = $2
+ORDER BY created_at DESC, id DESC
+LIMIT $3;
+
 -- ---------------------------------------------------------------- 日汇总
 
 -- 增量累加，会话结束时调用一次（量小，不进 worker）
@@ -305,6 +319,12 @@ SELECT k.id AS kp_id, t.code AS template_code, t.difficulty_band, t.generator_co
 FROM knowledge_points k
 JOIN math_templates t ON t.id = k.ref_id
 WHERE k.id = ANY(sqlc.arg(kp_ids)::uuid[]) AND k.kind = 'math_skill';
+
+-- name: LoadStoriesByKPs :many
+SELECT k.id AS kp_id, s.id AS story_id, s.title, s.summary, s.lang, s.level_code
+FROM knowledge_points k
+JOIN stories s ON s.id = k.ref_id
+WHERE k.id = ANY(sqlc.arg(kp_ids)::uuid[]) AND k.kind = 'story';
 
 -- name: ListMathTemplates :many
 SELECT code, question_type, difficulty_band, generator_config, display_config

@@ -422,6 +422,57 @@ func (r *Repository) CountPlanRows(ctx context.Context, childID uuid.UUID) (int6
 // ---------------------------------------------------------------- 转换工具
 
 // IsNoRows 判断 pgx 的「没有数据」错误。
+// ------------------------------------------------------------ 组卷素材（供 practice）
+
+func (r *Repository) loadHanziByKPs(ctx context.Context, kpIDs []uuid.UUID) ([]dbgen.LoadHanziByKPsRow, error) {
+	return r.q.LoadHanziByKPs(ctx, kpIDs)
+}
+
+func (r *Repository) loadEnWordsByKPs(ctx context.Context, kpIDs []uuid.UUID) ([]dbgen.LoadEnWordsByKPsRow, error) {
+	return r.q.LoadEnWordsByKPs(ctx, kpIDs)
+}
+
+func (r *Repository) loadMathTemplatesByKPs(ctx context.Context, kpIDs []uuid.UUID) ([]dbgen.LoadMathTemplatesByKPsRow, error) {
+	return r.q.LoadMathTemplatesByKPs(ctx, kpIDs)
+}
+
+func (r *Repository) loadStoriesByKPs(ctx context.Context, kpIDs []uuid.UUID) ([]dbgen.LoadStoriesByKPsRow, error) {
+	return r.q.LoadStoriesByKPs(ctx, kpIDs)
+}
+
+func (r *Repository) listMathTemplates(ctx context.Context) ([]dbgen.ListMathTemplatesRow, error) {
+	return r.q.ListMathTemplates(ctx)
+}
+
+func (r *Repository) getMathTemplate(ctx context.Context, code string) (dbgen.GetMathTemplateByCodeRow, error) {
+	return r.q.GetMathTemplateByCode(ctx, code)
+}
+
+// listHanziWords 按 hanzi_id 归组返回组词，一次查完避免 N+1。
+func (r *Repository) listHanziWords(ctx context.Context, hanziIDs []uuid.UUID) (map[uuid.UUID][]string, error) {
+	out := make(map[uuid.UUID][]string, len(hanziIDs))
+	if len(hanziIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.q.ListHanziWords(ctx, hanziIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out[row.HanziID] = append(out[row.HanziID], row.Word)
+	}
+	return out, nil
+}
+
+func nullString(v pgtype.Text) string {
+	if !v.Valid {
+		return ""
+	}
+	return v.String
+}
+
+func stringSlice(raw []byte) []string { return decodeStringList(raw) }
+
 func IsNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
 
 func decodeStringList(raw []byte) []string {
