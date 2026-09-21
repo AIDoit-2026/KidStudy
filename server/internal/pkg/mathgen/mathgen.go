@@ -95,6 +95,8 @@ func generateOne(cfg Config, r *randx.Rand) Question {
 		return genMixed(cfg, r)
 	case "word":
 		return genWord(cfg, r)
+	case "seq":
+		return genSeq(cfg, r)
 	default:
 		return genAdd(cfg, r)
 	}
@@ -201,6 +203,31 @@ func genMixed(cfg Config, r *randx.Rand) Question {
 		Answer:   strconv.Itoa(left + c),
 		Explain:  fmt.Sprintf("先算 %d - %d = %d，再加 %d 得 %d", a, b, left, c, left+c),
 		Layout:   layoutOf(cfg),
+	}
+}
+
+// genSeq 等差数列找规律：给出 4 项 + 一个空位。用升序，避免负数的干扰。
+// 打印中心的「比大小·找规律」用这个算子；屏幕练习暂无对应题型。
+func genSeq(cfg Config, r *randx.Rand) Question {
+	step := r.Range(1, 5)
+	// 起点上界要留出 4 个步长，保证末项不超 Max（Max 至少要比 Min 大 4*step）
+	room := cfg.Max - cfg.Min - 4*step
+	if room < 0 {
+		room = 0
+	}
+	start := cfg.Min + r.Range(0, room)
+	terms := make([]int, 0, 4)
+	for i := 0; i < 4; i++ {
+		terms = append(terms, start+i*step)
+	}
+	answer := start + 4*step
+	return Question{
+		Template: cfg.Op,
+		Prompt: fmt.Sprintf("%d, %d, %d, %d, ____",
+			terms[0], terms[1], terms[2], terms[3]),
+		Answer:  strconv.Itoa(answer),
+		Explain: fmt.Sprintf("每次加 %d，所以下一个是 %d", step, answer),
+		Layout:  layoutOf(cfg),
 	}
 }
 
