@@ -10,6 +10,7 @@ sql:
       - "migrations/0002_qr_exchange.up.sql"
       - "migrations/0003_content.up.sql"
       - "migrations/0004_learning.up.sql"
+      - "migrations/0005_reward.up.sql"
     queries: "queries"
     gen:
       go:

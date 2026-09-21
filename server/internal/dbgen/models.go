@@ -26,6 +26,22 @@ type AnswerLog struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
+// 成就徽章定义：rule 是 JSON 规则（type + threshold + 可选 subject），由 report 模块的评测器解释
+type Badge struct {
+	ID   uuid.UUID `json:"id"`
+	Code string    `json:"code"`
+	Name string    `json:"name"`
+	// session=单次会话 / streak=连续达标 / mastery=掌握量 / star=星星累计
+	Category    string `json:"category"`
+	Description string `json:"description"`
+	Icon        string `json:"icon"`
+	// 判定规则，如 {"type":"mastery_count","subject":"chinese","threshold":10}
+	Rule      []byte             `json:"rule"`
+	SortOrder int32              `json:"sort_order"`
+	Active    bool               `json:"active"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 // 孩子档案：一个家长独占自己的孩子，不跨家长共享
 type Child struct {
 	ID       uuid.UUID `json:"id"`
@@ -39,6 +55,16 @@ type Child struct {
 	Settings  []byte             `json:"settings"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+// 孩子已获得的成就：unique(child_id, badge_id) 保证同一致就只落一条，授予天然幂等
+type ChildBadge struct {
+	ID       uuid.UUID          `json:"id"`
+	ChildID  uuid.UUID          `json:"child_id"`
+	BadgeID  uuid.UUID          `json:"badge_id"`
+	EarnedAt pgtype.Timestamptz `json:"earned_at"`
+	// 授予时的事实快照（当时的掌握量 / 连续天数等），供家长查看「凭什么拿到的」
+	Progress []byte `json:"progress"`
 }
 
 // 审核队列：采集/导入内容默认进队，家长通过后目标表转 published
@@ -90,6 +116,10 @@ type DailyStat struct {
 	// 正 = 落后标准节奏 N 天，负 = 提前
 	DeviationDays float64            `json:"deviation_days"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	// 当日是否达标（全程合计行 subject_code='' 才代表当日；要求客观题完成且正确率达标）
+	Passed bool `json:"passed"`
+	// 当日是否有家长确认记录；require_parent_confirm 开启时，达标必须由它点亮
+	ParentConfirmed bool `json:"parent_confirmed"`
 }
 
 // 英语句型库：E10 的 ~130 句句型，M3 起用于句型填空与跟读

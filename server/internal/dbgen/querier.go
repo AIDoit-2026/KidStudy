@@ -8,9 +8,13 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
+	BadgeMasteryStats(ctx context.Context, childID uuid.UUID) (BadgeMasteryStatsRow, error)
+	// 成就评测素材（一次取全，评测器在 Go 侧判定）
+	BadgeSessionStats(ctx context.Context, childID uuid.UUID) (BadgeSessionStatsRow, error)
 	// 家长确认/补录：主观项评分写这里，客观计数一个都不动（§4.11 家长评分不污染客观正确率）
 	ConfirmSession(ctx context.Context, arg ConfirmSessionParams) (ConfirmSessionRow, error)
 	CountDueReviews(ctx context.Context, arg CountDueReviewsParams) (int64, error)
@@ -47,10 +51,18 @@ type Querier interface {
 	GetWrongEntry(ctx context.Context, arg GetWrongEntryParams) (GetWrongEntryRow, error)
 	// ---------------------------------------------------------------- 答题流水
 	InsertAnswerLog(ctx context.Context, arg InsertAnswerLogParams) error
+	// 授予（幂等）：已授予过就不动，返回是否本次新发
+	InsertChildBadge(ctx context.Context, arg InsertChildBadgeParams) (uuid.UUID, error)
 	InsertPlanRow(ctx context.Context, arg InsertPlanRowParams) error
 	// ---------------------------------------------------------------- 会话
 	InsertSession(ctx context.Context, arg InsertSessionParams) (InsertSessionRow, error)
 	InsertSessionItem(ctx context.Context, arg InsertSessionItemParams) (SessionItem, error)
+	// ---------------------------------------------------------------- 成就
+	ListBadges(ctx context.Context) ([]ListBadgesRow, error)
+	ListChildBadges(ctx context.Context, childID uuid.UUID) ([]ListChildBadgesRow, error)
+	// ---------------------------------------------------------------- 日汇总 worker
+	// 全量孩子（含活跃与已归档，归档孩子不铺新线但仍可重算历史）
+	ListChildIDs(ctx context.Context) ([]uuid.UUID, error)
 	ListChildrenForPlan(ctx context.Context) ([]ListChildrenForPlanRow, error)
 	// 到期复习：逾期越久越靠前，同逾期程度下掌握度低的优先（§4.2 步骤 2）
 	ListDueReviews(ctx context.Context, arg ListDueReviewsParams) ([]ListDueReviewsRow, error)
@@ -65,6 +77,8 @@ type Querier interface {
 	ListNewKPsByPlan(ctx context.Context, arg ListNewKPsByPlanParams) ([]ListNewKPsByPlanRow, error)
 	// 新学候选（阶段兜底）：孩子没有基准线时按阶段顺序取，保证新孩子也能开局
 	ListNewKPsByStage(ctx context.Context, arg ListNewKPsByStageParams) ([]ListNewKPsByStageRow, error)
+	// 连续达标天数（从今天往回数，遇到未达标即停）
+	ListPassedDaysDesc(ctx context.Context, arg ListPassedDaysDescParams) ([]pgtype.Date, error)
 	// ---------------------------------------------------------------- 专项指派
 	ListPendingAssignments(ctx context.Context, arg ListPendingAssignmentsParams) ([]ListPendingAssignmentsRow, error)
 	ListPlannedKPs(ctx context.Context, arg ListPlannedKPsParams) ([]ListPlannedKPsRow, error)
@@ -89,16 +103,77 @@ type Querier interface {
 	// 难度自适应用：取最近 n 次作答的正确与否与用时（§4.2「连 3 次正确率<60% 降档」）
 	RecentAnswers(ctx context.Context, arg RecentAnswersParams) ([]RecentAnswersRow, error)
 	RejectStory(ctx context.Context, id uuid.UUID) (int64, error)
+	// 逐日作答数（对比里的正确率/重复次数按天聚合）
+	ReportDailyAnswers(ctx context.Context, arg ReportDailyAnswersParams) ([]ReportDailyAnswersRow, error)
+	// ---------------------------------------------------------------- 多孩对比（§4.10）
+	// 逐日新掌握数（用于按「学习日序号」或自然日累加）
+	ReportDailyMastered(ctx context.Context, arg ReportDailyMasteredParams) ([]ReportDailyMasteredRow, error)
+	// ---------------------------------------------------------------- 趋势
+	// 逐日趋势：返回 '' 合计行与分学科行，service 按需归拢。
+	ReportDailySeries(ctx context.Context, arg ReportDailySeriesParams) ([]ReportDailySeriesRow, error)
+	// 待复习 / 积压（复习队列长度，用于「设为复习日」建议与总览）
+	ReportDueCount(ctx context.Context, arg ReportDueCountParams) (int64, error)
+	// 掌握一个知识点平均要作答几次（§4.9 学习效率口径）
+	ReportEfficiencyTotal(ctx context.Context, arg ReportEfficiencyTotalParams) (ReportEfficiencyTotalRow, error)
+	// 第一个学习日（对齐用的起点）
+	ReportFirstStudyDate(ctx context.Context, childID uuid.UUID) (pgtype.Date, error)
+	// 逐日逐知识点的正确率（最近 N 天），service 用它判「连续 3 天低正确率」
+	ReportKPDailyAccuracy(ctx context.Context, arg ReportKPDailyAccuracyParams) ([]ReportKPDailyAccuracyRow, error)
+	// 某学科最近一次学习日期（建议规则 2：连续 5 天未学）
+	ReportLastStudyDate(ctx context.Context, arg ReportLastStudyDateParams) (pgtype.Timestamptz, error)
+	// 报表 / 成就 / 日汇总的查询。
+	//
+	// 约定：
+	//  1. 「学习日」按 Asia/Shanghai 切分（M3 的 daily_stats.stat_date 就是用本机 +08 时区的
+	//     startOfDay 算的，两边一致才不会出现同一晚跨天的行被算到两天）。
+	//  2. 报表模块会直接 JOIN knowledge_points 取学科/阶段 —— 读报表天然需要多表聚合，
+	//     走 content.Service 反而要拆成 N 次查询并自带 N+1，这里按「读模型」处理。
+	//  3. 不排名、不做负向判定：SQL 只出事实，措辞在 service 层统一。
+	// ---------------------------------------------------------------- 总览
+	ReportMasteryTotals(ctx context.Context, childID uuid.UUID) (ReportMasteryTotalsRow, error)
+	// ---------------------------------------------------------------- 节奏与效率（§4.9）
+	// 逐日计划 vs 实际（分学科），pace 报表的双曲线数据源
+	ReportPaceSeries(ctx context.Context, arg ReportPaceSeriesParams) ([]ReportPaceSeriesRow, error)
+	// 当前偏差：当日掌握的进度所对应的计划日期（工作日）。
+	// offset = 已掌握数 - 1，落在计划顺序上取那一天；service 再算 今天 - planned_date。
+	ReportPlannedDateAtProgress(ctx context.Context, arg ReportPlannedDateAtProgressParams) (pgtype.Date, error)
+	ReportSessionTotals(ctx context.Context, childID uuid.UUID) (ReportSessionTotalsRow, error)
+	// 分阶段进度（成长树用）：该阶段的计划量 / 已掌握量
+	ReportStageProgress(ctx context.Context, arg ReportStageProgressParams) ([]ReportStageProgressRow, error)
+	// 分学科进度：已掌握 / 计划总量 / 待复习
+	ReportSubjectProgress(ctx context.Context, arg ReportSubjectProgressParams) ([]ReportSubjectProgressRow, error)
+	ReportTotals(ctx context.Context, childID uuid.UUID) (ReportTotalsRow, error)
+	// ---------------------------------------------------------------- 薄弱项（建议规则 1）
+	// 某学科最近 N 天里「掌握度还不到 3 且答错过」的知识点，按错误率排序（TopN）
+	ReportWeakKPs(ctx context.Context, arg ReportWeakKPsParams) ([]ReportWeakKPsRow, error)
+	// 薄弱题型 TopN（§4.7 数据源）
+	ReportWeakQuestionTypes(ctx context.Context, arg ReportWeakQuestionTypesParams) ([]ReportWeakQuestionTypesRow, error)
+	// 效率趋势：按自然周统计「掌握数 / 总作答数 / 正确率」（近 N 周滚动）
+	ReportWeeklyEfficiency(ctx context.Context, arg ReportWeeklyEfficiencyParams) ([]ReportWeeklyEfficiencyRow, error)
+	RollupCumMastered(ctx context.Context, arg RollupCumMasteredParams) (int64, error)
+	RollupCumPlanned(ctx context.Context, arg RollupCumPlannedParams) (int64, error)
+	// 当日该学科的作答与正确数（判达标用，避免与 M3 的增量口径互相打架）
+	RollupDailyAnswers(ctx context.Context, arg RollupDailyAnswersParams) (RollupDailyAnswersRow, error)
+	RollupDailyMastered(ctx context.Context, arg RollupDailyMasteredParams) (int64, error)
+	// 当日是否有家长确认（completed_by 为 parent / mixed 即视为家长参与过确认）
+	RollupParentConfirmed(ctx context.Context, arg RollupParentConfirmedParams) (bool, error)
+	RollupPlannedForDate(ctx context.Context, arg RollupPlannedForDateParams) (int64, error)
+	// 当日「重复练习」量：当天作答的题里，知识点在当天之前就已经学过（首学日 < 当天）
+	RollupRepeatCount(ctx context.Context, arg RollupRepeatCountParams) (int64, error)
 	SessionCounts(ctx context.Context, sessionID uuid.UUID) (SessionCountsRow, error)
 	// 今日已用秒数：未结束的会话按「到现在」计，保证额度校验不会因忘记 finish 而失效
 	TodayUsedSeconds(ctx context.Context, arg TodayUsedSecondsParams) (int64, error)
 	// 只认 pending → 重复提交同一题不会二次计分
 	UpdateItemAnswer(ctx context.Context, arg UpdateItemAnswerParams) error
 	UpsertAssignment(ctx context.Context, arg UpsertAssignmentParams) (UpsertAssignmentRow, error)
+	// 写回汇总行：只覆盖「计划/节奏/达标」这几列，时长与题量仍以会话增量为准。
+	UpsertDailyRollup(ctx context.Context, arg UpsertDailyRollupParams) error
 	// ---------------------------------------------------------------- 日汇总
 	// 增量累加，会话结束时调用一次（量小，不进 worker）
 	UpsertDailyStat(ctx context.Context, arg UpsertDailyStatParams) (UpsertDailyStatRow, error)
 	UpsertMastery(ctx context.Context, arg UpsertMasteryParams) (UpsertMasteryRow, error)
+	// ---------------------------------------------------------------- 家长设置
+	UpsertParentSettings(ctx context.Context, arg UpsertParentSettingsParams) (UpsertParentSettingsRow, error)
 	UpsertStage(ctx context.Context, arg UpsertStageParams) error
 	UpsertWrongEntry(ctx context.Context, arg UpsertWrongEntryParams) (UpsertWrongEntryRow, error)
 }
