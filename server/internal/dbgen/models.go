@@ -226,6 +226,8 @@ type LearningSession struct {
 	Status      string             `json:"status"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	// 纸质补录来源：非空表示这次会话由 print_jobs 的 mark-done 补录产生（§4.6 步骤 6）
+	PrintJobID pgtype.UUID `json:"print_job_id"`
 }
 
 // 登录审计：记录登录/扫码/兑换等事件，便于排查异常登录
@@ -323,6 +325,28 @@ type PracticeAssignment struct {
 	Status    string             `json:"status"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UsedAt    pgtype.Timestamptz `json:"used_at"`
+}
+
+// 打印记录：一次「选模板 + 填参数」= 一个 job；payload 是渲染数据快照（§4.6）
+type PrintJob struct {
+	ID           uuid.UUID `json:"id"`
+	ParentID     uuid.UUID `json:"parent_id"`
+	ChildID      uuid.UUID `json:"child_id"`
+	TemplateCode string    `json:"template_code"`
+	// 家长填的原始参数（范围 / 每页题量 / 字号 / 是否带拼音 / 是否含答案 / 纸张 / 份数等）
+	Params []byte `json:"params"`
+	// 生成好的题面数据快照：{template_code, render_version, title, meta, pages:[...], answer_pages:[...]}；答案页只在家长版渲染
+	Payload   []byte `json:"payload"`
+	PageCount int32  `json:"page_count"`
+	// 相对 STORAGE_DIR 的 PDF 路径，如 print/{id}.pdf；为空表示尚未生成
+	PdfPath pgtype.Text `json:"pdf_path"`
+	// created=建好未排 / queued=已排待渲染 / rendering=worker 渲染中 / ready=PDF 可下载 / failed=渲染失败（见 error_message）
+	Status       string `json:"status"`
+	ErrorMessage string `json:"error_message"`
+	// 家长标记「纸上已做完」的时间；非空表示这次打印已计入进度（补录幂等靠它）
+	MarkedDoneAt pgtype.Timestamptz `json:"marked_done_at"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 // 扫码登录会话：二维码 60 秒过期，兑换码一次性

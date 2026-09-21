@@ -15,6 +15,8 @@ type Querier interface {
 	BadgeMasteryStats(ctx context.Context, childID uuid.UUID) (BadgeMasteryStatsRow, error)
 	// 成就评测素材（一次取全，评测器在 Go 侧判定）
 	BadgeSessionStats(ctx context.Context, childID uuid.UUID) (BadgeSessionStatsRow, error)
+	// worker 拉取待渲染任务（多实例安全）。
+	ClaimPrintJobs(ctx context.Context, lim int32) ([]ClaimPrintJobsRow, error)
 	// 家长确认/补录：主观项评分写这里，客观计数一个都不动（§4.11 家长评分不污染客观正确率）
 	ConfirmSession(ctx context.Context, arg ConfirmSessionParams) (ConfirmSessionRow, error)
 	CountDueReviews(ctx context.Context, arg CountDueReviewsParams) (int64, error)
@@ -24,9 +26,20 @@ type Querier interface {
 	// 本次会话里「今天第一次学到」的知识点数，用于 daily_stats.actual_new
 	CountNewLearnedToday(ctx context.Context, arg CountNewLearnedTodayParams) (int64, error)
 	CountPlanForChild(ctx context.Context, childID uuid.UUID) (int64, error)
+	CountPrintJobs(ctx context.Context, arg CountPrintJobsParams) (int64, error)
 	CountReviewQueue(ctx context.Context, arg CountReviewQueueParams) (int64, error)
 	CountStories(ctx context.Context, arg CountStoriesParams) (int64, error)
 	CountWrongBook(ctx context.Context, arg CountWrongBookParams) (int64, error)
+	// 打印中心的查询（§4.6）。
+	//
+	// 约定：
+	//  1. payload 是自洽的数据快照：worker 渲染 PDF 时只依赖它 + template_code，
+	//     不再回查 content/mastery —— 否则模板改版或内容下线会让历史任务渲染不出原样。
+	//  2. 「无过滤」用哨兵值表示（child_id = 全零 uuid），与 content.sql 用 '' 表示无过滤一致，
+	//     避免 sqlc 在可空参数上的类型推断歧义。
+	//  3. worker 取任务用 FOR UPDATE SKIP LOCKED，多实例并行拉取不会重复渲染同一个 job。
+	// ---------------------------------------------------------------- 建与读
+	CreatePrintJob(ctx context.Context, arg CreatePrintJobParams) (PrintJob, error)
 	DecideReview(ctx context.Context, arg DecideReviewParams) (DecideReviewRow, error)
 	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) error
 	DeleteMastery(ctx context.Context, arg DeleteMasteryParams) error
@@ -43,6 +56,7 @@ type Querier interface {
 	GetMathTemplateByCode(ctx context.Context, code string) (GetMathTemplateByCodeRow, error)
 	// 家长控制：额度与开关（§4.2 步骤 1）。查不到就用默认值，不报错。
 	GetParentSettings(ctx context.Context, parentID uuid.UUID) (GetParentSettingsRow, error)
+	GetPrintJob(ctx context.Context, arg GetPrintJobParams) (PrintJob, error)
 	GetReviewByID(ctx context.Context, id uuid.UUID) (ContentReview, error)
 	GetSession(ctx context.Context, arg GetSessionParams) (GetSessionRow, error)
 	GetSessionItem(ctx context.Context, arg GetSessionItemParams) (SessionItem, error)
@@ -54,6 +68,8 @@ type Querier interface {
 	// 授予（幂等）：已授予过就不动，返回是否本次新发
 	InsertChildBadge(ctx context.Context, arg InsertChildBadgeParams) (uuid.UUID, error)
 	InsertPlanRow(ctx context.Context, arg InsertPlanRowParams) error
+	// 补录产生的学习会话：completed_by='parent'，并回指到 print_job，报表可区分来源（§4.11）。
+	InsertPrintSession(ctx context.Context, arg InsertPrintSessionParams) (uuid.UUID, error)
 	// ---------------------------------------------------------------- 会话
 	InsertSession(ctx context.Context, arg InsertSessionParams) (InsertSessionRow, error)
 	InsertSessionItem(ctx context.Context, arg InsertSessionItemParams) (SessionItem, error)
@@ -82,6 +98,7 @@ type Querier interface {
 	// ---------------------------------------------------------------- 专项指派
 	ListPendingAssignments(ctx context.Context, arg ListPendingAssignmentsParams) ([]ListPendingAssignmentsRow, error)
 	ListPlannedKPs(ctx context.Context, arg ListPlannedKPsParams) ([]ListPlannedKPsRow, error)
+	ListPrintJobs(ctx context.Context, arg ListPrintJobsParams) ([]PrintJob, error)
 	ListReviewQueue(ctx context.Context, arg ListReviewQueueParams) ([]ListReviewQueueRow, error)
 	ListSessionItems(ctx context.Context, sessionID uuid.UUID) ([]SessionItem, error)
 	// 内容模块的读查询（sqlc 生成到 internal/feature/content/dbgen）。
@@ -99,6 +116,13 @@ type Querier interface {
 	LoadMathTemplatesByKPs(ctx context.Context, kpIds []uuid.UUID) ([]LoadMathTemplatesByKPsRow, error)
 	LoadStoriesByKPs(ctx context.Context, kpIds []uuid.UUID) ([]LoadStoriesByKPsRow, error)
 	MarkAssignmentDone(ctx context.Context, arg MarkAssignmentDoneParams) error
+	// 纸质补录标记：只在还没标过的时候写，返回标记时间；已标过返回 0 行，service 据此判幂等。
+	MarkPrintJobDone(ctx context.Context, arg MarkPrintJobDoneParams) (MarkPrintJobDoneRow, error)
+	MarkPrintJobFailed(ctx context.Context, arg MarkPrintJobFailedParams) error
+	// ---------------------------------------------------------------- 状态机
+	// 排队渲染：created / failed 才允许重新排队；ready 重复调用不改变状态（幂等）。
+	MarkPrintJobQueued(ctx context.Context, arg MarkPrintJobQueuedParams) (MarkPrintJobQueuedRow, error)
+	MarkPrintJobReady(ctx context.Context, arg MarkPrintJobReadyParams) (MarkPrintJobReadyRow, error)
 	// ---------------------------------------------------------------- 家长设置
 	// 家长设置的完整视图（含 compare_children）；parent 模块专用，
 	// 不动 learning.sql 里 practice 已经在用的 GetParentSettings，避免连带影响。
@@ -158,6 +182,8 @@ type Querier interface {
 	ReportWeakQuestionTypes(ctx context.Context, arg ReportWeakQuestionTypesParams) ([]ReportWeakQuestionTypesRow, error)
 	// 效率趋势：按自然周统计「掌握数 / 总作答数 / 正确率」（近 N 周滚动）
 	ReportWeeklyEfficiency(ctx context.Context, arg ReportWeeklyEfficiencyParams) ([]ReportWeeklyEfficiencyRow, error)
+	// 渲染中的任务超过 staleSec 视为进程崩溃遗留，退回 queued 重试（幂等：worker 启动时跑一次）。
+	RequeueStaleRendering(ctx context.Context, staleSec float64) error
 	RollupCumMastered(ctx context.Context, arg RollupCumMasteredParams) (int64, error)
 	RollupCumPlanned(ctx context.Context, arg RollupCumPlannedParams) (int64, error)
 	// 当日该学科的作答与正确数（判达标用，避免与 M3 的增量口径互相打架）
