@@ -1,0 +1,198 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   KidStudy 主题系统
+   ------------------------------------------------------------
+   所有颜色都是 CSS 变量：切主题只改 data-theme 属性，组件类名不动。
+   字号由 --font-scale 控制（root font-size 缩放，Tailwind 的 rem 自动跟随）；
+   亮度由两层固定遮罩实现（见文件末尾），不走 filter —— filter 会给
+   position:fixed 造新的 containing block，把锁屏/休息页的定位搞乱。
+   ============================================================ */
+
+@layer base {
+  :root {
+    /* 默认：米黄纸感（护眼首选，长时间阅读不刺眼） */
+    --c-paper: #f5eee0;
+    --c-surface: #fffdf6;
+    --c-raised: #ffffff;
+    --c-ink: #2e2a22;
+    --c-ink-soft: #6a6152;
+    --c-brand: #c2703a;
+    --c-brand-ink: #fffaf2;
+    --c-accent: #2f6feb;
+    --c-line: #e3d8c2;
+    --c-danger: #c0392b;
+    --c-success: #2f8f4e;
+
+    --font-scale: 1;
+    --brightness: 1;
+    --motion-duration: 180ms;
+    --veil-dark: 0;
+    --veil-light: 0;
+
+    font-size: calc(16px * var(--font-scale, 1));
+    color-scheme: light;
+  }
+
+  html[data-theme='light'] {
+    --c-paper: #f4f6f9;
+    --c-surface: #ffffff;
+    --c-raised: #ffffff;
+    --c-ink: #1f2430;
+    --c-ink-soft: #5a6272;
+    --c-brand: #2f6feb;
+    --c-brand-ink: #ffffff;
+    --c-line: #dfe4ec;
+    color-scheme: light;
+  }
+
+  html[data-theme='dark'] {
+    --c-paper: #15181d;
+    --c-surface: #1c2027;
+    --c-raised: #232830;
+    --c-ink: #e8eaf0;
+    --c-ink-soft: #a3abbb;
+    --c-brand: #e0913f;
+    --c-brand-ink: #1a1d22;
+    --c-accent: #6ea8fe;
+    --c-line: #333a45;
+    --c-danger: #f08a7e;
+    --c-success: #7fd39b;
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--c-paper);
+    color: var(--c-ink);
+    font-family:
+      system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* 孩子端多是触屏：去掉双击缩放带来的 300ms 延迟 */
+    touch-action: manipulation;
+  }
+
+  /* 触屏设备不吃 hover：只在真指针设备上启用 hover 反馈 */
+  @media (hover: hover) {
+    .hoverable:hover {
+      background-color: var(--c-raised);
+    }
+  }
+}
+
+@layer components {
+  /* 卡片：孩子端与家长端共用的基础容器 */
+  .card {
+    background-color: var(--c-surface);
+    border: 1px solid var(--c-line);
+    border-radius: 1rem;
+    padding: 1rem;
+  }
+
+  /* 大按钮：大屏用方向键/回车触发，触屏用手指点，所以焦点环必须明显 */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.875rem;
+    padding: 0.75rem 1.25rem;
+    font-weight: 600;
+    border: 1px solid var(--c-line);
+    background-color: var(--c-surface);
+    color: var(--c-ink);
+    transition: transform var(--motion-duration) ease, background-color var(--motion-duration) ease;
+  }
+
+  .btn-primary {
+    background-color: var(--c-brand);
+    color: var(--c-brand-ink);
+    border-color: transparent;
+  }
+
+  .btn:focus-visible,
+  .focusable:focus-visible {
+    outline: 3px solid var(--c-accent);
+    outline-offset: 2px;
+  }
+
+  /* 大屏方向键选中态：不依赖 :hover，所以触屏/键盘都能看到 */
+  .is-active {
+    outline: 3px solid var(--c-accent);
+    outline-offset: 2px;
+    background-color: var(--c-raised);
+  }
+}
+
+@layer utilities {
+  /* 屏幕阅读器可见、视觉隐藏 */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/* ------------------------------------------------------------
+   打印（@media print）：.print-hidden 只在打印时消失。
+   用途单一 —— 打印预览页的工具栏不该出现在纸上。
+   ------------------------------------------------------------ */
+@media print {
+  .print-hidden {
+    display: none !important;
+  }
+}
+
+/* ------------------------------------------------------------
+   亮度遮罩：降低亮度叠黑、提高亮度叠白。
+   alpha 由 themeStore 预先算好写进变量 —— CSS 里算不出 max(0, x)，
+   直接对负值求 opacity 会让整条声明失效。
+   ------------------------------------------------------------ */
+.veil {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.veil-dark {
+  z-index: 40;
+  background-color: #000;
+  opacity: var(--veil-dark, 0);
+}
+
+.veil-light {
+  z-index: 41;
+  background-color: #fff;
+  opacity: var(--veil-light, 0);
+}
+
+/* 减少动态效果：动画与过渡几乎归零（无障碍要求，非可选） */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-duration: 0.01ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

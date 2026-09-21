@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="sepia">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>KidStudy · 亲子学习</title>
+    <script>
+      // 首屏前注入主题，避免刷新时闪白/闪黑（FOUC）。
+      // 只读 UI 偏好（主题/字号/亮度），不含任何敏感信息，放 localStorage 是有意为之。
+      (function () {
+        try {
+          var raw = localStorage.getItem('kidstudy.theme')
+          var s = raw ? JSON.parse(raw).state : null
+          var mode = (s && s.mode) || 'sepia'
+          var auto = s ? s.followSunset !== false : true
+          if (mode === 'auto' || (auto && mode !== 'dark' && mode !== 'light')) {
+            var h = new Date().getHours()
+            mode = h >= 18 || h < 7 ? 'dark' : 'sepia'
+          }
+          var el = document.documentElement
+          el.setAttribute('data-theme', mode)
+          if (s) {
+            if (s.fontScale) el.style.setProperty('--font-scale', String(s.fontScale))
+            if (typeof s.brightness === 'number') el.style.setProperty('--brightness', String(s.brightness))
+          }
+        } catch (e) {
+          /* 读不到就用默认主题，不阻塞首屏 */
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

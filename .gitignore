@@ -79,6 +79,8 @@ build/
 .parcel-cache/
 coverage/
 *.tsbuildinfo
+# 自定义 npm cache 目录（本机用 --cache 指到 web/.npm-cache，避免污染全局）
+.npm-cache/
 npm-debug.log*
 yarn-error.log*
 pnpm-debug.log*
