@@ -1,146 +1,80 @@
 # KidStudy 项目长期约定
 
-## Git 提交规范（用户明确要求，强制执行）
-
-- **不等整个里程碑结束**：每完成 1~2 项功能就提交一次。
-- **提交信息以 emoji 开头**标识类型：
-
-| emoji | 前缀 | 用途 |
-| --- | --- | --- |
-| ✨ | `✨ feat:` | 新功能 / 新端点 / 新模块 |
-| 🐛 | `🐛 fix:` | 缺陷修复（写明根因） |
-| 📝 | `📝 docs:` | 文档与设计说明 |
-| 🗃️ | `🗃️ db:` | 数据库迁移与 schema 变更 |
-| ♻️ | `♻️ refactor:` | 重构（不改外部行为），单独提交 |
-| ✅ | `✅ test:` | 测试与验收脚本 |
-| 🔧 | `🔧 chore:` | 构建、依赖、脚手架、CI |
-| 🚀 | `🚀 perf:` | 性能优化（附实测数据） |
-
-- 一条提交只做一件事；提交前必须 `go build ./...`（后端）或 `npm run build`（前端）通过。
+## Git 提交规范（强制）
+- 每完成 1–2 项功能就提交，不等里程碑结束；一条提交只做一件事。
+- 消息以 emoji 开头：✨feat 🐛fix 📝docs 🗃️db ♻️refactor ✅test 🔧chore 🚀perf。
+- 提交前必须过 `go build ./...`（后端）或 `npm run build`（前端）。
 
 ## 架构与工程约束（详见 docs/开发设计文档.md）
+- 后端按功能组织 + 三层：handler / service / repository / model。handler 不写业务，
+  service 不 import `net/http`，跨模块只走 service 接口注入。
+- 配置全来自环境变量并在启动时集中校验，缺失即 fail-fast；只提交 `.env.example`。
+- 错误用 `apperr` 类型化 + 全局映射，绝不返回堆栈；响应恒为 `{data, meta.request_id}`。
+- 脚本与内容资产统一放 `var/`（gitignored，仅 README 入库）；冒烟脚本放 `server/tmp/`。
 
-- 后端按功能组织 + 三层：handler / service / repository / model 四件套；handler 不写业务，service 不 import `net/http`，跨模块只走 service 接口注入。
-- 配置全部来自环境变量并在启动时集中校验，缺失或非法即 fail-fast。
-- 错误用 `apperr` 类型化 + 全局映射，客户端只看规范结构，绝不返回堆栈。
-- 内容/ poc 脚本产出的资产统一放 `var/`（gitignored，仅 `var/README.md` 入库）。
+## 已拍板的产品决策
+- 关闭公开注册（`BOOTSTRAP_INVITE_CODE`）；故事只做亲子朗读，不做控字改写。
+- 节奏只作基准线不设闸门，不限每日次数与进度；`answer_logs` 不分区。
+- 多孩对比按「学习日序号」对齐，只并列不排名。
+- 每日完成 = 程序判客观题 + 家长确认主观项 + 兜底手动标记，`require_parent_confirm` 默认关。
 
-## 已拍板的产品决策（2026-09-20）
+## 本机开发注意事项
+- 8080 被 Jenkins 占，本地起 API 用 `HTTP_ADDR=:18080`。本机有代理，
+  curl 本机**必须** `curl --noproxy '*'`，否则 502。
+- PostgreSQL 18.6（5432），库/角色均为 `kidstudy`；口令只在 `server/.env` 与 pgpass，
+  不进命令行与代码；psql 未进 PATH，走 PowerShell 更稳。
+- Go 1.27.1；迁移：`cd server && go run ./cmd/api -migrate`（`-rollback` 回退一步）。
+- **端到端冒烟一律写成脚本再跑**（`server/tmp/*.py`，已 gitignore）：命令行里出现口令或
+  长 Bearer 会被安全策略拦下等待确认。Git Bash 执行 `.sh` 会触发 wsl.exe 黑名单。
+- 起服务前确认老进程已死（老 api.exe 占着 18080 时 curl 仍打旧二进制）：
+  `netstat -ano | grep 18080` 取 PID 后 kill。
+- 前端 `web/.env` 的 `VITE_API_BASE_URL` 主机必须与**访问前端的地址同站**：
+  后端 Refresh 是 HttpOnly + `SameSite=Lax`，跨站的 fetch 不会带它 → 换页即掉登录。
+  localhost 与 127.0.0.1 在浏览器眼里是**两个站**，故本机统一 `localhost`
+  （CORS 白名单也配 `http://localhost:5173`）。
+- 装/跑前端走托管 node 全路径 `C:\Users\zhang\.workbuddy\binaries\node\versions\22.22.2-3\`；
+  npm 用 `node <该目录>/node_modules/npm/bin/npm-cli.js`（`.cmd` shim 在 Git Bash 会踩坑），
+  registry 用 `https://registry.npmmirror.com`；如需独立缓存加 `--cache web/.npm-cache`
+  （该目录已 gitignore）。
+- 从零入库的前端无法让每一笔提交都过 `vite build`（`index.html` 引用的 `main.tsx` 最后才出现）：
+  中间各笔只保证 `tsc --noEmit` 通过，最后一笔跑全量 build；故 add 顺序必须按依赖拓扑排。
+- 浏览器自动化：`node <同上>/node_modules/agent-browser/bin/agent-browser.js`
+  （全局装的 wrapper 脚本在 Git Bash 解析路径会错，直接调 JS 入口）。
+  命令串用 `batch` + stdin 的 JSON 数组（`[["open","url"],...]`，不是行文本）。
+  **每个 batch 都要重新登录** —— daemon 会在批处理之间重建上下文，Cookie/localStorage 被清空；
+  且前台调浏览器易被 SIGTERM，放后台跑并重定向日志。
 
-- 关闭公开注册（首次启动用 `BOOTSTRAP_INVITE_CODE`）；故事只做亲子朗读，不做控字改写；TTS 先用浏览器语音（M2），预生成音频 M4；连接层用 sqlc。
-- 节奏：标准节奏只作**基准线不设闸门**，不限制每日次数与进度，统计偏差、重复次数、学习效率。
-- `answer_logs` 不分区；多孩对比按「学习日序号」对齐，只并列不排名。
-- 每日完成判定：**程序判定客观题 + 家长确认主观项 + 兜底手动标记**，`require_parent_confirm` 默认关。
+## 技术栈
+- 后端 Go + chi + pgx；连接层用 sqlc，**不用 ORM**：本项目是「批量导入 + 复杂查询
+  （今日编排 / SM-2 / 多孩对比）」，恰是 ORM 的短板，且内容资产先于代码存在。
+- `sqlc.yaml` 必须写 `sql_package: "pgx/v5"`；`schema` 只列 `migrations/*.up.sql`
+  （整个目录会被 down 脚本的 DROP 打乱解析）；生成物在 `internal/dbgen`（入库）。
+- 读查询走 sqlc；**批量写入不走 sqlc**，用 `content/bulk.go` 的多行 upsert
+  （200 行/语句 + 同批次冲突键去重，否则 SQLSTATE 21000）。
+- 前端 Vite + React 18 + TS + Tailwind（CSS 变量主题）+ TanStack Query + Zustand + RR6。
 
-## 本机开发注意事项（KidStudy 专属）
+## 接口契约易错点（踩过就长记性）
+- `POST /auth/login` 只认 `{account, password}`（account 收邮箱或手机号）；
+  注册才是 email/phone 分开。写成 email/phone 必 422。
+- `/parent/settings` 的 `session_limit_min` 只收 **5–120**（0 不合法）；
+  `daily_limit_min` 0–480、`rest_interval_min` 0–120 才允许 0 表示不限/不强制。
+- 健康检查在根路径 `/health`、`/ready`，**不在** `/api/v1` 下。
 
-- 本机 **8080 端口被 Jenkins 占用**，本地起服务用 `HTTP_ADDR=:18080` 这类高位端口。
-- 本机有代理（`http_proxy=127.0.0.1:42703`）：curl 本机服务**必须** `curl --noproxy '*'`，否则 502。
-- PostgreSQL **18.6** 已装（`C:\Program Files\PostgreSQL\18`，5432），库/角色均为 `kidstudy`。
-  - 口令**只**存 `server/.env`（gitignore）与 `%APPDATA%\postgresql\pgpass.conf`，**不要**写进命令行或代码。
-  - psql 未进 PATH；Git Bash 调 exe 会被 shim 改写路径，走 PowerShell 更稳。
-- Go **1.27.1**（`C:\Program Files\Go`，唯一安装）；`go.mod` 的 go 指令已对齐 1.27.1。
-- 迁移已实机跑通：`cd server && go run ./cmd/api -migrate`（`-rollback` 回退一步）。
-- **端到端冒烟要写成脚本执行**：命令行里出现口令、长串 Bearer 时会被安全策略拦下等待确认（超时即中止）。放 `server/tmp/*.py`（已 gitignore）再跑最稳。
-- Git Bash 执行 `.sh` 脚本会触发 wsl.exe 黑名单，别走这条路。
-
-## 技术栈决策（2026-09-20 晚）
-
-- **不换语言，继续 Go**。用户问过是否改 C# + EF Core，结论：ORM 是库不是语言特性，
-  换成 C# 只会为了已经能用 sqlc/bun/Ent 解决的小痛点付出全量重写成本。
-- **连接层定 sqlc**。工具：`tools/sqlc.exe`（v1.31.1，官方 Release 的 Windows amd64，
-  已被 `*.exe` 规则忽略，不入库；重装时重新下载同版本即可。查版本：`./tools/sqlc.exe version`。
-- 已实测 sqlc 能完整解析 `migrations/0001+0002` 的 DDL（含 uuid / jsonb / 部分索引 /
-  COMMENT ON），生成代码处理好：可空列→`sql.NullString`、jsonb→`json.RawMessage`、
-  表与列的 COMMENT 会带进 Go 注释。
-- 生成代码需要依赖 `github.com/google/uuid`（已有）与 `github.com/sqlc-dev/pqtype`
-  （login_audit 的 inet 列会用到）；正式接入时补进 go.mod。
-- **不用 ORM（EF Core 之类）的三条理由**：① 本项目负载是「批量导入 8103 字/48000 组词/
-  18913 故事」+「复杂查询（今日编排、SM-2、多孩对比）」，ORM 恰好在批量写入与复杂 SQL 上
-  是短板；② Code First 的"双向同步"实为单向 diff + 人工 review，schema 变更里的数据迁移
-  ORM 仍解决不了；③ 内容资产先于代码存在（数据先行），SQL-first 比 Code-first 更契合。
-- 若日后觉得简单 CRUD 啰嗦，可在同一项目里给那一小块单独引入 `bun`（与 sqlc 可共存），
-  不必二选一。
-- `.gitignore` 已追加 `tools/sqlc` 规则（对 `*.exe` 而言冗余，但无害，保留）。
-
-## sqlc 实际落地方式（2026-09-21，M2 实证）
-
-- 生成物落在 **`internal/dbgen`**（不是 feature 子包），生成代码**入库**，构建不依赖 sqlc 二进制。
-  重生成：`cd server && ./tools/sqlc.exe generate`。
-- `sqlc.yaml` 必须写 `sql_package: "pgx/v5"`：默认生成 `database/sql` 版 DBTX，`pgxpool.Pool` 满足不了。
-- `schema` 只列 `migrations/*.up.sql`；把整个目录丢进去会被 down 脚本的 `DROP` 打乱解析。
-- yaml 注释里不要出现冒号（`mapping values are not allowed in this context`）。
-- **批量写入不走 sqlc**：生成的是单行语句，1.9 万行会多几个数量级往返；COPY 又带不了
-  `ON CONFLICT`。用 `internal/feature/content/bulk.go` 的多行 upsert（200 行/语句）+
-  冲突键去重（同批次同键会触发 SQLSTATE 21000）。
-- 读查询（列表/详情/审核）走 sqlc；M1 的 auth / children 仍手写 pgx，不动。
-
-## M2 已交付（内容底座，2026-09-21）
-
-- 表：knowledge_points / hanzi / hanzi_words / en_words / en_sentences / stories /
-  story_pairs / videos / math_templates / content_review / curriculum_plan（迁移 0003）。
-- 导入量：阶段 39、汉字 8103（6864 带笔顺）、组词 29199、英语词 1802、故事 18908、
-  双语配对 830、审核队列 18908、每孩基准线 9905 条。`cmd/importer` 幂等可重跑
-  （`-only stages|hanzi|words|stories|plans` 跑单步，`-data` 指数据目录）。
-- 内容即发布策略：汉字/组词/英语词（自有管线）→ `published`；故事（采集）→ `pending`
-  + `content_review`，家长审核通过才 `published`；`suitable=false` 的孩子端默认屏蔽。
-- 端点：`/content/{stages,hanzi,hanzi/{idOrChar},words,stories,stories/{id},stories/{id}/pair}`、
-  `/review/queue`、`/review/{id}/approve|reject`、`/review/batch`。列表响应带
-  `meta.page{offset,limit,total}`（`response.JSONPaged`）。
-- 冒烟脚本 `server/tmp/smoke_m2.py`（36 项，对库内状态不敏感，可反复重跑）。
-- **本地起服务务必确认老进程已死**：老 api.exe 占着 18080 时新进程会 bind 失败，
-  但 curl 仍然 200（打的是旧二进制）。用 `tasklist` 找 PID + `taskkill /F /PID`。
-
-## M3 已交付（练习引擎，2026-09-21）
-
-- 迁移 0004：mastery_records / learning_sessions / session_items / answer_logs /
-  wrong_book_entries / daily_stats / practice_assignments；种子 14 套 math_templates
-  + 14 个 `kind='math_skill'` 知识点（数学此前一个 kp 都没有）。
-- `internal/pkg/randx`：splitmix64 确定性随机源；`Derive(seed, i)` 逐题派生种子，
-  所以数学题「同一 seed 两次生成完全一致」，且与 M5 打印中心同源。
-- `mastery`：简化 SM-2（level 0–5 / ease / interval 阶梯 1h-4h-1d-3d-30d）、错题本（连对 3 次移出）、
-  复习队列（逾期优先 + >100 条时暂停新学）、难度自适应（最近 3/5 次作答）、单知识点重置。
-- `practice`：今日编排（错题置顶→专项→复习→新学，语文 6 / 英语 5 / 数学 2）、9 题型组卷、
-  服务端判分、会话结算（星级 + daily_stats 增量）、家长确认（不污染客观正确率）。
-- 端点：`/practice/{today,session,session/{id}[/answer|skip|finish|confirm],math/templates,math/preview}`、
-  `/mastery/{review-queue,wrong-book[/:id],{kpId}/reset}`。
-- 冒烟 `server/tmp/smoke_m3.py`：71 项全通过（tmp 已 gitignore，与 M2 一致不入库）。
-
-### M3 引入的新约定
-
-- **组卷素材批量装载**：`content.Service.LoadMaterials(ctx, kpIDs)` 一次拿全，
-  practice 不逐 kp 回查；干扰项从同批素材里取（同阶段/同级别），不额外查库。
-- **题面与答案分列**：`session_items.question_snapshot`（可下发）与 `answer_key`（永不下发）。
-- **跨模块归属校验**：`children.Service.EnsureOwned` 返回领域对象（非对外视图），
-  越权一律 404；mastery/practice 都通过接口注入，不直接依赖具体类型。
-- **会话作用域的 child_id 既认 query 也认 body**（读完把 body 放回去）。
-
-## M4 已交付（评价与报表，2026-09-21）
-
-- 迁移 0005：`badges`（rule 是 JSON 规则）+ `child_badges`（unique 让授予幂等）+
-  `daily_stats` 补 `passed` / `parent_confirmed`。种子 16 枚徽章。
-- **约定**：`daily_stats.subject_code = ''` 行是「当天全天合计」，只有它的 `passed` 代表当日达标；
-  报表趋势也只看它（否则三科重复叠加）。
-- `cmd/worker` 独立日汇总进程：按 (孩子,日期,学科) **覆盖式**重算
-  planned_new/actual_new/repeat_count/cum_planned/cum_actual/deviation_days/passed，
-  与 M3 的会话增量不冲突（实测连续跑 rows 恒定）。`-days/-date/-child/-loop -at 03:30`。
-- `report` 模块：`/reports/{id}/{overview,trend,subject/{s},suggestions,pace,growth,badges,export}`、
-  `/reports/compare?childIds=a,b&align=session|calendar`（默认学习日对齐、只并列不排名）。
-- `parent` 模块：`GET|PUT /parent/settings`（部分更新用指针判「未提供」；默认值不落库）。
-- `require_parent_confirm` 生效点在 rollup：`dayPassed = 任一科达标 && (!开关 || 当日有家长确认)`。
-- 偏差口径：`当日 − 「已掌握数」在计划顺序上那一天的 planned_date`，正=落后、负=超前；
-  整孩取有计划的学科均值。**算日期差必须用 `daysBetween`**（pgx 的 date 是 UTC 零点，
-  本机 +08，直接相减差 8 小时 → -0.33 天）。
-- 跨模块单向：practice → report 只走 `BadgeAwarder` 接口；practice 不 import report。
-- 冒烟 `server/tmp/smoke_m4.py`（106 项）；数学题面在 `item.question.prompt`，不在顶层。
-- sqlc 三坑：`count(*) FILTER(...)::float8 / ...::float8` 推成 int32（比率 Go 侧算）；
-  `max(timestamptz)`/`min(date)` 推成 `interface{}`（显式 COALESCE+强转）；
-  `AT TIME ZONE` 旁的 `sqlc.arg(stat_date)` 推成 timestamptz（统一 `::date`）。
-
-## M1 已交付（认证 + 孩子档案）
-
-- 端点全在 `/api/v1`：`/auth/{register,login,refresh,logout,me,pin,qrcode/*}`、`/children[/{id}]`。
-- Access 15m JWT（typ=access）/ PIN 解锁 5m JWT（typ=unlock）**用途隔离**；Refresh 走 HttpOnly Cookie 且每次刷新轮换。
-- 二维码令牌与兑换码只在库里留 SHA-256；二维码 60s、兑换码 30s 一次性，失败 5 次作废。
-- 所有 children 查询强制带 `parent_id`，越权返回 404（非 403，避免暴露 ID 是否存在）；删除是软归档。
-- ~~M2 开工前需决定连接层是否切 sqlc~~ → 已定：用 sqlc，见「技术栈决策」。M1 手写部分不动。
+## 各里程碑固化下来的约定
+- **M1 认证**：Access 15m JWT（typ=access）与 PIN 解锁 5m JWT（typ=unlock）用途隔离；
+  Refresh 走 HttpOnly Cookie 且每次刷新轮换；越权一律 404（不 403，避免暴露 ID 是否存在）；
+  孩子删除是软归档。
+- **M2 内容**：阶段 39 / 汉字 8103 / 组词 29199 / 英语词 1802 / 故事 18908 / 双语配对 830；
+  内容即发布（自有管线 → published，采集故事 → pending + 审核）；列表响应带 `meta.page`。
+- **M3 练习**：`randx.Derive(seed, i)` 逐题派生种子 → 同一 seed 题目完全一致（与 M5 打印同源）；
+  `question_snapshot` 可下发、`answer_key` 永不下发；组卷用 `LoadMaterials` 批量装素材不逐 kp 回查。
+- **M4 报表**：`daily_stats.subject_code = ''` 是当天全天合计，只有它的 `passed` 代表达标（趋势同理）；
+  日汇总 worker 按 (孩子,日期,学科) 覆盖式重算；**算日期差必须用 `daysBetween`**
+  （pgx 的 date 是 UTC 零点，本机 +08 直接相减会差 8 小时）。
+- **M5 打印**：预览 HTML 与 chromedp 出的 PDF 是**同一份字符串**；`POST /pdf` 只置 queued 返 202，
+  由 `cmd/worker -print` 消费（`FOR UPDATE SKIP LOCKED`）；`page_count` 读 PDF 真实页树；
+  mark-done 一个事务四步、靠 `marked_done_at IS NULL` 幂等。
+- **M6 前端**：Access Token 只存模块级内存（不进 localStorage / 不进 URL）；
+  401 单飞刷新并重放一次，4xx 不重试、5xx/网络错误最多 3 次指数退避；
+  亮度用两层 fixed 遮罩而非 `filter`（filter 会给 fixed 造新 containing block）；
+  护眼计时只在孩子端外壳；打印预览 `/print/:jobId` 不挂外壳（无导航、无护眼计时）。
