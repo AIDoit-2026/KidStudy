@@ -88,6 +88,7 @@
 | **M2 内容底座** | ✅ 已完成 | 内容域 11 张表、sqlc 生成查询、`cmd/importer` 一次性导入（汉字 8103 / 组词 29199 / 英语词 1802 / 故事 18908 / 双语配对 830 / 笔顺 6864 字）、内容检索 7 个端点、审核队列（18908 条 pending）+ 批量上线、每孩 `curriculum_plan` 基准线 9905 条 |
 | **M3 练习引擎** | ✅ 已完成 | 迁移 0004 学习域 7 张表 + 14 套数学模板与 `math_skill` 知识点、`mastery` 模块（简化 SM-2 / 错题本 / 复习队列 / 难度自适应）、`practice` 模块（今日编排 / 9 题型组卷 / 服务端判分 / 会话结算 / 家长确认）、`randx` 确定性随机源，冒烟 71 项全通过 |
 | **M4 评价与报表** | ✅ 已完成 | 迁移 0005 成就表与 `daily_stats` 达标标记、`cmd/worker` 独立日汇总进程、`report` 模块（总览 / 趋势 / 学科明细 / 建议规则 / 节奏偏差 / 成长树 / 徽章 / CSV 导出 / 多孩对比）、`parent` 模块（设置读写）、`require_parent_confirm` 真生效，冒烟 106 项全通过 |
+| **M5 打印中心** | ✅ 已完成 | 迁移 0006 打印任务表 + `learning_sessions.print_job_id`、`platform/storage` 本地对象存储、`print` 模块（10 套模板 / HTML 渲染 / chromedp PDF / 队列 / 纸质补录）、`pkg/mathgen` 数学生成器下沉、`cmd/worker -print` 消费渲染队列，冒烟 107 项全通过 |
 
 ### 连接层定 sqlc（2026-09-20 晚拍板，2026-09-21 落地）
 
@@ -158,19 +159,56 @@
 - 导出：`text/csv` + BOM + 中文表头 + 行数与窗口一致，`format=pdf` 422；
 - 越权：未登录 401、他人孩子 404。
 
+### M5 落地要点（2026-09-21）
+
+- **渲染只有一套**：预览 HTML、家长浏览器 Ctrl+P、chromedp 出的 PDF 用的是**同一份 HTML 字符串**，
+  「屏幕所见 = 打印所得」是结构保证，不是靠两套代码对齐。
+- **PDF 渲染放 worker**：API 的 `POST /pdf` 只把任务置 `queued` 并返回 202，真正渲染由
+  `cmd/worker -print` 消费（§8 不在请求处理器里跑长任务）；claim 用 `FOR UPDATE SKIP LOCKED`，
+  超时未完成的按 `-print-stale` 退回队列。
+- **`page_count` 读真实页树**：`/Type /Page` 计数（排除 `/Pages`）与各级 `/Count` 取最大互校，
+  不拿排版估算冒充事实；估算只在 PDF 就绪前作为 `planned_pages` 单独展示。
+- **补录一个事务四步**：标记完成 + 建补录会话 + 逐个写掌握度（复用 mastery 状态机）+
+  清专项指派；幂等靠 `marked_done_at IS NULL`，重复提交返回 `already_done`。
+- **补录以 payload 为准**：payload 是不可变快照，请求里出现但不在快照里的 kp 直接忽略，
+  防止拿别的任务的知识点回填进度。
+- **renderer 懒启动**：API 进程也构造它但不初始化（不拉 Chromium），本机没装浏览器不会
+  把「看报表」一起拖下水；真正需要内核的是 worker。
+- **`print → report` 多一条只读边**：周报模板复用 `Overview` / `Trend` / `Suggestions`，
+  免得报表口径抄两份；方向仍单向（report 不认识 print）。
+
+**验收结果**（`server/tmp/smoke_m5.py`，107 项全通过）
+
+- 模板：10 套齐全、参数契约完整、纯教具（闪卡/拼音格/字母卡/故事/周报）标 `answerable=false`；
+- 建任务：10 套模板逐套建出（连线题按阶段取内容）；口算同 seed 两次题面逐题一致（20 题）；
+- PDF：202 入队 → `worker -print` 渲染 → `ready` + 真实 2 页 → 下载 `%PDF-1.4`（90 KB）；
+  未就绪下载 409、重复排队幂等保持 `ready`；
+- 补录：标错 1 个知识点 → 它出现在错题本；重复提交 `already_done`；闪卡/周报补录 422；
+- 列表：分页 `total` 一致、按孩子过滤、非法 `childId` 422；
+- 越权：未登录 401；他人任务在 `GET` / `data` / `preview` / `pdf` / `mark-done` 全部 404；非法 id 404。
+
 ## 下一步
 
-**M5 打印中心**开工要点：
+**M6 护眼与多端**开工要点：
 
-1. `print` 模块与 `print_jobs` 表：`GET /print/templates`、`POST /print/jobs`、
-   `GET /print/jobs/{id}/data`、`POST|GET /print/jobs/{id}/pdf`、`POST /print/jobs/{id}/mark-done`。
-2. 10 套模板 + `print.css`（`@page A4 / margin 15mm`、`break-inside: avoid`、白底黑字、
-   中文用 LXGW WenKai、答案页独立一节仅家长版渲染、图形走 SVG）。
-3. PDF 用 chromedp 渲染同一套模板，保证「屏幕预览 = 打印 = PDF」；
-   数学题面复用 `randx.Derive(seed, i)`，与屏幕练习逐题同源。
-4. 纸质补录：`mark-done` 按 payload 里的 kp 批量写掌握度，走 `practice_assignments`
-   与 mastery 状态机，来源标 `completed_by=parent`，报表可区分。
-5. 报表 PDF 复用周报告模板（`GET /reports/{id}/export?format=pdf` 目前只支持 csv）。
+1. 前端工程起步（React 18 + TS + Vite，§2.3）：先搭壳与 API 客户端，再按页面推进。
+2. 主题与护眼：米黄/深色主题、字号/亮度调节、20-20-20 提醒、时长到点锁屏（PIN 解锁）。
+3. 四档断点（手机/平板/大屏/打印），大屏键盘方向键答题。
+4. 前端接入打印中心：按 `GET /print/templates` 的参数 schema 动态渲染表单；
+   预览跳 `/print/jobs/{id}/preview`（无壳布局，直接用浏览器打印）。
+5. 收口 M4 遗留的建议动作按钮；报表 PDF 导出接周报模板
+   （`GET /reports/{id}/export?format=pdf` 目前 422）。
+
+**M5 遗留（不阻塞 M6）**：
+
+| # | 事项 | 说明 |
+| --- | --- | --- |
+| 1 | PDF 未压缩存储 | 直接落原文件；后续可 gzip 或按需重生成（保留期 30 天由 worker `-purge` 清理） |
+| 2 | 模板字体依赖系统 | CSS 首选 LXGW WenKai，未安装则回退系统楷体；打包字体留到部署阶段 |
+| 3 | 故事小册子内容为空 | 故事都是 `pending`（内容即发布策略），家长审核通过后才有内容可印 |
+| 4 | 打印记录无重印入口 | 只能重新建任务（同 seed 可复现），没有「一键重印」按钮（M6 前端一并给） |
+| 5 | 报表 PDF 未接 | `/reports/{id}/export?format=pdf` 仍 422，走周报模板即可补上 |
+| 6 | 队列无进度可见性 | 家长端只能轮询 `GET /print/jobs/{id}` 看 `status`，没有实时推送 |
 
 **M4 遗留（不阻塞 M5）**：
 
