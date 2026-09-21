@@ -87,6 +87,7 @@
 | **M1 认证与孩子档案** | ✅ 已完成 | 邀请码注册、登录与失败锁定、Refresh 轮换与撤销、PIN 二次校验、扫码登录（二维码 60s + SSE 四事件 + 一次性兑换码）、孩子档案 CRUD（软归档 + 家长独占） |
 | **M2 内容底座** | ✅ 已完成 | 内容域 11 张表、sqlc 生成查询、`cmd/importer` 一次性导入（汉字 8103 / 组词 29199 / 英语词 1802 / 故事 18908 / 双语配对 830 / 笔顺 6864 字）、内容检索 7 个端点、审核队列（18908 条 pending）+ 批量上线、每孩 `curriculum_plan` 基准线 9905 条 |
 | **M3 练习引擎** | ✅ 已完成 | 迁移 0004 学习域 7 张表 + 14 套数学模板与 `math_skill` 知识点、`mastery` 模块（简化 SM-2 / 错题本 / 复习队列 / 难度自适应）、`practice` 模块（今日编排 / 9 题型组卷 / 服务端判分 / 会话结算 / 家长确认）、`randx` 确定性随机源，冒烟 71 项全通过 |
+| **M4 评价与报表** | ✅ 已完成 | 迁移 0005 成就表与 `daily_stats` 达标标记、`cmd/worker` 独立日汇总进程、`report` 模块（总览 / 趋势 / 学科明细 / 建议规则 / 节奏偏差 / 成长树 / 徽章 / CSV 导出 / 多孩对比）、`parent` 模块（设置读写）、`require_parent_confirm` 真生效，冒烟 106 项全通过 |
 
 ### 连接层定 sqlc（2026-09-20 晚拍板，2026-09-21 落地）
 
@@ -122,27 +123,74 @@
 - 家长打分后客观正确率不变；描红题 `is_correct` 为 `null`；
 - 越权 404、参数非法 422、评分越界 422。
 
+### M4 落地要点（2026-09-21）
+
+- **日汇总是独立进程**（`cmd/worker`），不塞进 API 的定时器：按天重算要跑几十秒，
+  放进程里会与请求抢连接池，也违背「不在请求处理器里跑长任务」。
+  `-days N` / `-date` / `-child` / `-loop -at 03:30`，单天失败重试 3 次后跳过并记账。
+- **M3 的增量与 M4 的重算分工**：会话结算时仍做增量写入（家长当场能看到数字），
+  日汇总对同一格是**覆盖式重算**（计划量、累计偏差、当日达标随时间推进会变，
+  孩子当天没学偏差也会变大）。两者对同一 (孩子, 日期, 学科) 不冲突，可反复跑。
+- **偏差口径**：`deviation_days = 当日 − 「已掌握数」落在计划顺序上那一天的 planned_date`，
+  正=落后、负=超前；没铺基准线的学科返回 0。整孩偏差取有计划的学科均值。
+- **`daily_stats` 的 `subject_code = ''` 行是「当天全天」**（M3 起就在写，M4 把它固化成约定）：
+  只有这一行的 `passed` 代表当日达标，报表趋势也只看它，避免三科重复叠加。
+- **`require_parent_confirm` 的生效点在日汇总**：
+  `dayPassed = 任一科达标 && (!requireConfirm || 当日有家长确认)`；开关关掉后重跑 worker 即点亮。
+- **成就规则存库**（`badges.rule` jsonb）：门槛调整不必发版，家长端能把规则直译成
+  「掌握 10 个汉字」。授予幂等（unique + `ON CONFLICT DO NOTHING`），
+  触发点是会话结算后 + 日汇总后两处。
+- **报表直接 JOIN `knowledge_points`**：读报表天然是多表聚合，走 content.Service 会拆成
+  N 次查询并自带 N+1；这条路按「读模型」处理，不再假装它是领域聚合。
+- **跨模块只走接口**：practice 新增 `BadgeAwarder`（只回授予数量）由 report 实现，
+  practice 不 import report；对比的孩子归属校验走 `children` 表带 `parent_id` 过滤。
+
+**验收结果**（`server/tmp/smoke_m4.py`，106 项全通过）
+
+- 设置读写：默认值、部分更新不动其它字段、`0 表示不限` 被正确保留、越界 422；
+- 报表：无数据时趋势逐日补零、学科明细带 24 个阶段、非法学科 422；
+- worker：今日 `planned_new=2`（数学）/`cum_planned=2`、偏差今日 0、历史日为负且随日期回升、
+  合计行 `cum_planned=13`（语文 6 + 数学 2 + 英语 5）；
+- `require_parent_confirm`：开启 → 当日不点亮；关闭后重跑 → 点亮；
+- 成就：会话结算自动授予「第一次练习」「满分小达人」，重复评测不再发；
+- 建议：3 天低正确率 fixture 触发「降档 + 专项练习」，文案不含负向标签；
+- 多孩对比：默认按学习日对齐、不排名、无 rank/score 字段、混入他人孩子 404、超 4 人 422；
+- 导出：`text/csv` + BOM + 中文表头 + 行数与窗口一致，`format=pdf` 422；
+- 越权：未登录 401、他人孩子 404。
+
 ## 下一步
 
-**M4 评价与报表**开工要点：
+**M5 打印中心**开工要点：
 
-1. `report` 模块：`GET /reports/{childId}/overview`、`/trend`、`/subject/{subject}`、`/suggestions`、
-   `/pace?days=90`（标准基准线 vs 实际：双曲线、偏差、重复次数、效率趋势）。
-2. 日汇总 worker 接管 `daily_stats`（M3 目前是会话结束时同步增量更新），补齐
-   `planned_new` / `cum_planned` / `cum_actual` / `deviation_days` 四列。
-3. 多孩对比 `GET /reports/compare?childIds=a,b&align=session|calendar`，按学习日对齐、只并列不排名。
-4. 星级、成就、成长树（`badges` / `child_badges` 表已在设计里，M4 建）。
-5. `require_parent_confirm` 开关真正生效：开启后当日徽章需家长点「确认完成」才点亮。
+1. `print` 模块与 `print_jobs` 表：`GET /print/templates`、`POST /print/jobs`、
+   `GET /print/jobs/{id}/data`、`POST|GET /print/jobs/{id}/pdf`、`POST /print/jobs/{id}/mark-done`。
+2. 10 套模板 + `print.css`（`@page A4 / margin 15mm`、`break-inside: avoid`、白底黑字、
+   中文用 LXGW WenKai、答案页独立一节仅家长版渲染、图形走 SVG）。
+3. PDF 用 chromedp 渲染同一套模板，保证「屏幕预览 = 打印 = PDF」；
+   数学题面复用 `randx.Derive(seed, i)`，与屏幕练习逐题同源。
+4. 纸质补录：`mark-done` 按 payload 里的 kp 批量写掌握度，走 `practice_assignments`
+   与 mastery 状态机，来源标 `completed_by=parent`，报表可区分。
+5. 报表 PDF 复用周报告模板（`GET /reports/{id}/export?format=pdf` 目前只支持 csv）。
 
-**M3 遗留（不阻塞 M4）**：
+**M4 遗留（不阻塞 M5）**：
 
 | # | 事项 | 说明 |
 | --- | --- | --- |
-| 1 | 故事未进练习 | `practice_assignments` 已建但故事知识点缺 `questions`/`discussion`，亲子朗读走 M4 |
+| 1 | worker 未装成系统服务 | 目前手动 `-loop` 跑；上云时交给系统计划任务或容器 sidecar（M7） |
+| 2 | 偏差只到「学科」粒度 | 单知识点维度没做偏差，家长主要看学科节奏，够用 |
+| 3 | 成就只有 16 枚 | 会话/连续/掌握/星星四类；后续可按题型、按故事阅读量扩 |
+| 4 | 建议规则的「降档 / 设复习日 / 调量」只有动作按钮 | 后端没有对应端点，前端点了要拼接现有接口（M6 一起收口） |
+| 5 | 对比曲线不降采样 | 自然日对齐最多 366 点，孩子学得久时点数偏多，前端需要抽稀 |
+| 6 | 趋势依赖 worker 跑过 | 未跑过的日子只有会话增量（时长/题量），计划与偏差列为 0 |
+
+**M3 遗留（仍未处理，不阻塞 M5）**：
+
+| # | 事项 | 说明 |
+| --- | --- | --- |
+| 1 | 故事未进练习 | `practice_assignments` 已建但故事知识点缺 `questions`/`discussion`，亲子朗读走 M5 |
 | 2 | 数学只有 14 套模板 | 覆盖 M1–M5 五档；几何、认识钟表等题型待补 |
 | 3 | 难度自适应偏保守 | 只按最近 3/5 次作答升降档，未结合阶段上限与历史掌握曲线 |
-| 4 | `daily_stats` 四项节奏列 | `planned_new`/`cum_*`/`deviation_days` 恒为 0，M4 worker 补 |
-| 5 | 会话过期清理 | `status='expired'` 目前无人置位，活跃会话跨天会一直挂着 |
+| 4 | 会话过期清理 | `status='expired'` 目前无人置位，活跃会话跨天会一直挂着 |
 
 **M2 遗留（仍未处理，不阻塞 M4）**：
 

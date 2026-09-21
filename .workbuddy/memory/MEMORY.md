@@ -115,6 +115,28 @@
   越权一律 404；mastery/practice 都通过接口注入，不直接依赖具体类型。
 - **会话作用域的 child_id 既认 query 也认 body**（读完把 body 放回去）。
 
+## M4 已交付（评价与报表，2026-09-21）
+
+- 迁移 0005：`badges`（rule 是 JSON 规则）+ `child_badges`（unique 让授予幂等）+
+  `daily_stats` 补 `passed` / `parent_confirmed`。种子 16 枚徽章。
+- **约定**：`daily_stats.subject_code = ''` 行是「当天全天合计」，只有它的 `passed` 代表当日达标；
+  报表趋势也只看它（否则三科重复叠加）。
+- `cmd/worker` 独立日汇总进程：按 (孩子,日期,学科) **覆盖式**重算
+  planned_new/actual_new/repeat_count/cum_planned/cum_actual/deviation_days/passed，
+  与 M3 的会话增量不冲突（实测连续跑 rows 恒定）。`-days/-date/-child/-loop -at 03:30`。
+- `report` 模块：`/reports/{id}/{overview,trend,subject/{s},suggestions,pace,growth,badges,export}`、
+  `/reports/compare?childIds=a,b&align=session|calendar`（默认学习日对齐、只并列不排名）。
+- `parent` 模块：`GET|PUT /parent/settings`（部分更新用指针判「未提供」；默认值不落库）。
+- `require_parent_confirm` 生效点在 rollup：`dayPassed = 任一科达标 && (!开关 || 当日有家长确认)`。
+- 偏差口径：`当日 − 「已掌握数」在计划顺序上那一天的 planned_date`，正=落后、负=超前；
+  整孩取有计划的学科均值。**算日期差必须用 `daysBetween`**（pgx 的 date 是 UTC 零点，
+  本机 +08，直接相减差 8 小时 → -0.33 天）。
+- 跨模块单向：practice → report 只走 `BadgeAwarder` 接口；practice 不 import report。
+- 冒烟 `server/tmp/smoke_m4.py`（106 项）；数学题面在 `item.question.prompt`，不在顶层。
+- sqlc 三坑：`count(*) FILTER(...)::float8 / ...::float8` 推成 int32（比率 Go 侧算）；
+  `max(timestamptz)`/`min(date)` 推成 `interface{}`（显式 COALESCE+强转）；
+  `AT TIME ZONE` 旁的 `sqlc.arg(stat_date)` 推成 timestamptz（统一 `::date`）。
+
 ## M1 已交付（认证 + 孩子档案）
 
 - 端点全在 `/api/v1`：`/auth/{register,login,refresh,logout,me,pin,qrcode/*}`、`/children[/{id}]`。
