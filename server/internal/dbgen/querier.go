@@ -11,24 +11,59 @@ import (
 )
 
 type Querier interface {
+	CountDueReviews(ctx context.Context, arg CountDueReviewsParams) (int64, error)
 	CountEnWords(ctx context.Context, arg CountEnWordsParams) (int64, error)
 	CountHanzi(ctx context.Context, arg CountHanziParams) (int64, error)
+	CountMastered(ctx context.Context, childID uuid.UUID) (int64, error)
 	CountPlanForChild(ctx context.Context, childID uuid.UUID) (int64, error)
 	CountReviewQueue(ctx context.Context, arg CountReviewQueueParams) (int64, error)
 	CountStories(ctx context.Context, arg CountStoriesParams) (int64, error)
+	CountWrongBook(ctx context.Context, arg CountWrongBookParams) (int64, error)
 	DecideReview(ctx context.Context, arg DecideReviewParams) (DecideReviewRow, error)
+	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) error
+	DeleteMastery(ctx context.Context, arg DeleteMasteryParams) error
+	DeleteWrongEntry(ctx context.Context, arg DeleteWrongEntryParams) error
+	FinishSession(ctx context.Context, arg FinishSessionParams) (FinishSessionRow, error)
 	GetHanziByChar(ctx context.Context, char string) (Hanzi, error)
 	GetHanziByID(ctx context.Context, id uuid.UUID) (Hanzi, error)
+	// 学习域查询（sqlc 生成到 internal/dbgen）：掌握度、错题本、会话、答题流水、日汇总、专项。
+	//
+	// 约定与 content.sql 一致：列表查询「过滤器为空即不过滤」；时间一律用参数传入，
+	// 不在 SQL 里用 now()，方便测试与「逾期时长」排序复用同一个时间戳。
+	// ---------------------------------------------------------------- 掌握度
+	GetMastery(ctx context.Context, arg GetMasteryParams) (GetMasteryRow, error)
+	GetMathTemplateByCode(ctx context.Context, code string) (GetMathTemplateByCodeRow, error)
 	GetReviewByID(ctx context.Context, id uuid.UUID) (ContentReview, error)
+	GetSession(ctx context.Context, arg GetSessionParams) (GetSessionRow, error)
+	GetSessionItem(ctx context.Context, arg GetSessionItemParams) (SessionItem, error)
 	GetStoryByID(ctx context.Context, id uuid.UUID) (GetStoryByIDRow, error)
 	GetStoryPair(ctx context.Context, zhStoryID uuid.UUID) (GetStoryPairRow, error)
+	GetWrongEntry(ctx context.Context, arg GetWrongEntryParams) (GetWrongEntryRow, error)
+	// ---------------------------------------------------------------- 答题流水
+	InsertAnswerLog(ctx context.Context, arg InsertAnswerLogParams) error
 	InsertPlanRow(ctx context.Context, arg InsertPlanRowParams) error
+	// ---------------------------------------------------------------- 会话
+	InsertSession(ctx context.Context, arg InsertSessionParams) (InsertSessionRow, error)
+	InsertSessionItem(ctx context.Context, arg InsertSessionItemParams) (SessionItem, error)
 	ListChildrenForPlan(ctx context.Context) ([]ListChildrenForPlanRow, error)
+	// 到期复习：逾期越久越靠前，同逾期程度下掌握度低的优先（§4.2 步骤 2）
+	ListDueReviews(ctx context.Context, arg ListDueReviewsParams) ([]ListDueReviewsRow, error)
 	ListEnWords(ctx context.Context, arg ListEnWordsParams) ([]ListEnWordsRow, error)
 	ListHanzi(ctx context.Context, arg ListHanziParams) ([]ListHanziRow, error)
 	ListHanziWords(ctx context.Context, hanziIds []uuid.UUID) ([]ListHanziWordsRow, error)
+	// ---------------------------------------------------------------- 组卷素材
+	ListKPsByIDs(ctx context.Context, kpIds []uuid.UUID) ([]ListKPsByIDsRow, error)
+	ListMasteryByKPs(ctx context.Context, arg ListMasteryByKPsParams) ([]ListMasteryByKPsRow, error)
+	ListMathTemplates(ctx context.Context) ([]ListMathTemplatesRow, error)
+	// 新学候选（基准线驱动）：按标准节奏的 Day 序号取还没学过的 kp（§4.2 步骤 4）
+	ListNewKPsByPlan(ctx context.Context, arg ListNewKPsByPlanParams) ([]ListNewKPsByPlanRow, error)
+	// 新学候选（阶段兜底）：孩子没有基准线时按阶段顺序取，保证新孩子也能开局
+	ListNewKPsByStage(ctx context.Context, arg ListNewKPsByStageParams) ([]ListNewKPsByStageRow, error)
+	// ---------------------------------------------------------------- 专项指派
+	ListPendingAssignments(ctx context.Context, arg ListPendingAssignmentsParams) ([]ListPendingAssignmentsRow, error)
 	ListPlannedKPs(ctx context.Context, arg ListPlannedKPsParams) ([]ListPlannedKPsRow, error)
 	ListReviewQueue(ctx context.Context, arg ListReviewQueueParams) ([]ListReviewQueueRow, error)
+	ListSessionItems(ctx context.Context, sessionID uuid.UUID) ([]SessionItem, error)
 	// 内容模块的读查询（sqlc 生成到 internal/feature/content/dbgen）。
 	//
 	// 约定：
@@ -37,9 +72,26 @@ type Querier interface {
 	//  3. 批量导入走 internal/feature/content/bulk.go 的多行 upsert（sqlc 不做批量写）。
 	ListStages(ctx context.Context, subjectCode string) ([]ListStagesRow, error)
 	ListStories(ctx context.Context, arg ListStoriesParams) ([]ListStoriesRow, error)
+	// ---------------------------------------------------------------- 错题本
+	ListWrongBook(ctx context.Context, arg ListWrongBookParams) ([]ListWrongBookRow, error)
+	LoadEnWordsByKPs(ctx context.Context, kpIds []uuid.UUID) ([]LoadEnWordsByKPsRow, error)
+	LoadHanziByKPs(ctx context.Context, kpIds []uuid.UUID) ([]LoadHanziByKPsRow, error)
+	LoadMathTemplatesByKPs(ctx context.Context, kpIds []uuid.UUID) ([]LoadMathTemplatesByKPsRow, error)
+	MarkAssignmentDone(ctx context.Context, arg MarkAssignmentDoneParams) error
 	PublishStory(ctx context.Context, id uuid.UUID) (int64, error)
 	RejectStory(ctx context.Context, id uuid.UUID) (int64, error)
+	SessionCounts(ctx context.Context, sessionID uuid.UUID) (SessionCountsRow, error)
+	// 今日已用秒数：未结束的会话按「到现在」计，保证额度校验不会因忘记 finish 而失效
+	TodayUsedSeconds(ctx context.Context, arg TodayUsedSecondsParams) (int64, error)
+	// 只认 pending → 重复提交同一题不会二次计分
+	UpdateItemAnswer(ctx context.Context, arg UpdateItemAnswerParams) error
+	UpsertAssignment(ctx context.Context, arg UpsertAssignmentParams) (UpsertAssignmentRow, error)
+	// ---------------------------------------------------------------- 日汇总
+	// 增量累加，会话结束时调用一次（量小，不进 worker）
+	UpsertDailyStat(ctx context.Context, arg UpsertDailyStatParams) (UpsertDailyStatRow, error)
+	UpsertMastery(ctx context.Context, arg UpsertMasteryParams) (UpsertMasteryRow, error)
 	UpsertStage(ctx context.Context, arg UpsertStageParams) error
+	UpsertWrongEntry(ctx context.Context, arg UpsertWrongEntryParams) (UpsertWrongEntryRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

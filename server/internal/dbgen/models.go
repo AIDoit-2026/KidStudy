@@ -11,6 +11,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// 原始答题流水，日汇总的原料。按决策 #6 不分区
+type AnswerLog struct {
+	ID           int64              `json:"id"`
+	ChildID      uuid.UUID          `json:"child_id"`
+	SessionID    pgtype.UUID        `json:"session_id"`
+	ItemID       pgtype.UUID        `json:"item_id"`
+	KpID         uuid.UUID          `json:"kp_id"`
+	SubjectCode  string             `json:"subject_code"`
+	QuestionType string             `json:"question_type"`
+	IsCorrect    bool               `json:"is_correct"`
+	UsedHint     bool               `json:"used_hint"`
+	ElapsedMs    int32              `json:"elapsed_ms"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
 // 孩子档案：一个家长独占自己的孩子，不跨家长共享
 type Child struct {
 	ID       uuid.UUID `json:"id"`
@@ -54,6 +69,27 @@ type CurriculumPlan struct {
 	// 按标准节奏推算的计划日期，与实际进度相减即偏差天数
 	PlannedDate pgtype.Date        `json:"planned_date"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+// 日汇总：会话结束时同步增量更新（量小）；planned/cum/deviation 三列留待 M4 报表与节奏偏差
+type DailyStat struct {
+	ID            uuid.UUID   `json:"id"`
+	ChildID       uuid.UUID   `json:"child_id"`
+	StatDate      pgtype.Date `json:"stat_date"`
+	SubjectCode   string      `json:"subject_code"`
+	DurationSec   int32       `json:"duration_sec"`
+	QuestionCount int32       `json:"question_count"`
+	CorrectCount  int32       `json:"correct_count"`
+	NewMastered   int32       `json:"new_mastered"`
+	StarCount     int32       `json:"star_count"`
+	PlannedNew    int32       `json:"planned_new"`
+	ActualNew     int32       `json:"actual_new"`
+	RepeatCount   int32       `json:"repeat_count"`
+	CumPlanned    int32       `json:"cum_planned"`
+	CumActual     int32       `json:"cum_actual"`
+	// 正 = 落后标准节奏 N 天，负 = 提前
+	DeviationDays float64            `json:"deviation_days"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 // 英语句型库：E10 的 ~130 句句型，M3 起用于句型填空与跟读
@@ -140,6 +176,28 @@ type KnowledgePoint struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+// 一次学习 = 一个会话；家长可补录主观评价（parent_score），不计入客观正确率
+type LearningSession struct {
+	ID            uuid.UUID          `json:"id"`
+	ChildID       uuid.UUID          `json:"child_id"`
+	DeviceType    string             `json:"device_type"`
+	StartedAt     pgtype.Timestamptz `json:"started_at"`
+	EndedAt       pgtype.Timestamptz `json:"ended_at"`
+	DurationSec   int32              `json:"duration_sec"`
+	QuestionCount int32              `json:"question_count"`
+	AnsweredCount int32              `json:"answered_count"`
+	CorrectCount  int32              `json:"correct_count"`
+	SkippedCount  int32              `json:"skipped_count"`
+	StarCount     int32              `json:"star_count"`
+	// auto 程序判定 / parent 家长确认或补录 / mixed 两者皆有
+	CompletedBy pgtype.Text        `json:"completed_by"`
+	ParentScore pgtype.Int2        `json:"parent_score"`
+	ParentNote  pgtype.Text        `json:"parent_note"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 // 登录审计：记录登录/扫码/兑换等事件，便于排查异常登录
 type LoginAudit struct {
 	ID        uuid.UUID          `json:"id"`
@@ -149,6 +207,36 @@ type LoginAudit struct {
 	Ua        pgtype.Text        `json:"ua"`
 	Success   bool               `json:"success"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// 掌握度唯一挂载点：每个（孩子, 知识点）一条，简化 SM-2 的状态全在这里
+type MasteryRecord struct {
+	ID      uuid.UUID `json:"id"`
+	ChildID uuid.UUID `json:"child_id"`
+	KpID    uuid.UUID `json:"kp_id"`
+	// 0 未学 / 1-2 学习中 / 3 已掌握 / 4-5 巩固与维持
+	Level int16   `json:"level"`
+	Ease  float64 `json:"ease"`
+	// 下次复习间隔（小时）。0.17 表示 10 分钟后会话内复现
+	IntervalHours float64            `json:"interval_hours"`
+	NextReviewAt  pgtype.Timestamptz `json:"next_review_at"`
+	// 难度档，由难度自适应升降（§4.2：连 3 次正确率<60% 降档）
+	Difficulty     int16              `json:"difficulty"`
+	CorrectCount   int32              `json:"correct_count"`
+	WrongCount     int32              `json:"wrong_count"`
+	Streak         int32              `json:"streak"`
+	WrongStreak    int32              `json:"wrong_streak"`
+	LastResult     pgtype.Text        `json:"last_result"`
+	FirstLearnedAt pgtype.Timestamptz `json:"first_learned_at"`
+	MasteredAt     pgtype.Timestamptz `json:"mastered_at"`
+	Attempts       int32              `json:"attempts"`
+	// 掌握前花了多少次作答；与 attempts 相除即学习效率
+	AttemptsToMaster pgtype.Int4 `json:"attempts_to_master"`
+	// 出现在多少个不同学习日，用于统计「标准内容的重复次数」
+	RepeatDays     int32              `json:"repeat_days"`
+	LastReviewDate pgtype.Date        `json:"last_review_date"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 // 数学题模板：模板 + 参数化生成（seed 可复现），M3 起启用
@@ -195,6 +283,18 @@ type ParentSetting struct {
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 }
 
+// 家长专项指派：来自报表建议或打印补录，优先进入今日任务（§4.2 步骤 5）
+type PracticeAssignment struct {
+	ID        uuid.UUID          `json:"id"`
+	ChildID   uuid.UUID          `json:"child_id"`
+	KpID      uuid.UUID          `json:"kp_id"`
+	ParentID  uuid.UUID          `json:"parent_id"`
+	Reason    string             `json:"reason"`
+	Status    string             `json:"status"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UsedAt    pgtype.Timestamptz `json:"used_at"`
+}
+
 // 扫码登录会话：二维码 60 秒过期，兑换码一次性
 type QrLoginSession struct {
 	ID               uuid.UUID          `json:"id"`
@@ -225,6 +325,28 @@ type RefreshToken struct {
 	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
 	ReplacedBy pgtype.UUID        `json:"replaced_by"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+// 题目快照：答题即落库，报表可复现，不依赖题库后续变更
+type SessionItem struct {
+	ID           uuid.UUID   `json:"id"`
+	SessionID    uuid.UUID   `json:"session_id"`
+	Seq          int32       `json:"seq"`
+	KpID         uuid.UUID   `json:"kp_id"`
+	SubjectCode  string      `json:"subject_code"`
+	StageCode    pgtype.Text `json:"stage_code"`
+	QuestionType string      `json:"question_type"`
+	Difficulty   int16       `json:"difficulty"`
+	// 题面（prompt/options/media），可直接下发给前端
+	QuestionSnapshot []byte `json:"question_snapshot"`
+	// 正确答案，服务端判分专用，任何读接口都不返回
+	AnswerKey []byte `json:"answer_key"`
+	State     string `json:"state"`
+	// NULL = 未判定（trace/say 等主观项），不计入客观正确率
+	IsCorrect  pgtype.Bool        `json:"is_correct"`
+	UsedHint   bool               `json:"used_hint"`
+	ElapsedMs  pgtype.Int4        `json:"elapsed_ms"`
+	AnsweredAt pgtype.Timestamptz `json:"answered_at"`
 }
 
 // 学习阶段基准：S0-S5 / G1-G12 / X1-X6（语文），E1-E10（英语），L1-L5（数学）
@@ -300,4 +422,17 @@ type Video struct {
 	AddedBy     pgtype.UUID        `json:"added_by"`
 	Status      string             `json:"status"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+// 错题本：同一 kp 只保留一条，答错重新打开（cleared_at 置空），连对 3 次自动移出
+type WrongBookEntry struct {
+	ID      uuid.UUID          `json:"id"`
+	ChildID uuid.UUID          `json:"child_id"`
+	KpID    uuid.UUID          `json:"kp_id"`
+	AddedAt pgtype.Timestamptz `json:"added_at"`
+	// NULL = 在错题中；非 NULL = 已移出（保留记录供统计）
+	ClearedAt          pgtype.Timestamptz `json:"cleared_at"`
+	ConsecutiveCorrect int32              `json:"consecutive_correct"`
+	WrongCount         int32              `json:"wrong_count"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }

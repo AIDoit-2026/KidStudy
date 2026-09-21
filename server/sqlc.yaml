@@ -9,6 +9,7 @@ sql:
       - "migrations/0001_init.up.sql"
       - "migrations/0002_qr_exchange.up.sql"
       - "migrations/0003_content.up.sql"
+      - "migrations/0004_learning.up.sql"
     queries: "queries"
     gen:
       go:
@@ -21,3 +22,9 @@ sql:
         overrides:
           - go_type: "github.com/google/uuid.UUID"
             db_type: "uuid"
+          # ease / interval_hours / deviation_days 都是 numeric，但它们是调度启发值不是金额，
+          # 用 float64 让 Go 侧能直接做算术；已实测 pgx/v5 能双向无损读写 numeric<->float64。
+          - go_type: "float64"
+            db_type: "pg_catalog.numeric"
+          - go_type: "time.Time"
+            db_type: "pg_catalog.date"
