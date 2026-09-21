@@ -28,8 +28,11 @@ const (
 	// EasePenaltyWrong —— 答错的因子惩罚
 	EasePenaltyWrong = 0.20
 
-	// WrongIntervalHours —— 答错后 10 分钟会话内复现（§4.3）
+	// WrongIntervalHours —— 答错后的间隔（小时），10 分钟
 	WrongIntervalHours = 0.17
+	// WrongReappearAfter —— 答错后会话内复现的等待时长（§4.3）。
+	// 单独定义而不是从 WrongIntervalHours 换算，免得 0.17 小时被取整成 11 分钟。
+	WrongReappearAfter = 10 * time.Minute
 
 	// MinIntervalHours —— 首次答对后至少 1 小时再复习，避免「刚会就考」
 	MinIntervalHours = 1
@@ -129,6 +132,7 @@ type WrongEntry struct {
 	ID                 uuid.UUID `json:"id"`
 	KPID               uuid.UUID `json:"kp_id"`
 	SubjectCode        string    `json:"subject_code"`
+	Kind               string    `json:"kind"`
 	Code               string    `json:"code"`
 	Name               string    `json:"name"`
 	WrongCount         int       `json:"wrong_count"`

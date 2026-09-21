@@ -180,6 +180,19 @@ RETURNING id, child_id, device_type, started_at, ended_at, duration_sec, questio
           answered_count, correct_count, skipped_count, star_count, completed_by,
           parent_score, parent_note, status;
 
+-- 家长确认/补录：主观项评分写这里，客观计数一个都不动（§4.11 家长评分不污染客观正确率）
+-- name: ConfirmSession :one
+UPDATE learning_sessions SET
+    parent_score = sqlc.arg(parent_score),
+    parent_note  = sqlc.arg(parent_note),
+    completed_by = COALESCE(sqlc.arg(completed_by), learning_sessions.completed_by),
+    status       = CASE WHEN status = 'active' THEN 'finished' ELSE status END,
+    updated_at   = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(id) AND child_id = sqlc.arg(child_id)
+RETURNING id, child_id, device_type, started_at, ended_at, duration_sec, question_count,
+          answered_count, correct_count, skipped_count, star_count, completed_by,
+          parent_score, parent_note, status;
+
 -- 今日已用秒数：未结束的会话按「到现在」计，保证额度校验不会因忘记 finish 而失效
 -- name: TodayUsedSeconds :one
 SELECT COALESCE(sum(CASE
@@ -264,6 +277,22 @@ ON CONFLICT (child_id, stat_date, subject_code) DO UPDATE SET
     updated_at     = now()
 RETURNING id, child_id, stat_date, subject_code, duration_sec, question_count, correct_count,
           new_mastered, star_count, planned_new, actual_new, repeat_count;
+
+-- 家长控制：额度与开关（§4.2 步骤 1）。查不到就用默认值，不报错。
+-- name: GetParentSettings :one
+SELECT parent_id, daily_limit_min, session_limit_min, rest_interval_min, subject_switches,
+       require_parent_confirm, pace_mode
+FROM parent_settings
+WHERE parent_id = $1;
+
+-- 本次会话里「今天第一次学到」的知识点数，用于 daily_stats.actual_new
+-- name: CountNewLearnedToday :one
+SELECT count(*)::bigint
+FROM mastery_records
+WHERE child_id = sqlc.arg(child_id)
+  AND kp_id = ANY(sqlc.arg(kp_ids)::uuid[])
+  AND first_learned_at >= sqlc.arg(day_start)
+  AND first_learned_at < sqlc.arg(day_start) + interval '1 day';
 
 -- ---------------------------------------------------------------- 专项指派
 

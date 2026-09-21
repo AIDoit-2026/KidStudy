@@ -11,10 +11,14 @@ import (
 )
 
 type Querier interface {
+	// 家长确认/补录：主观项评分写这里，客观计数一个都不动（§4.11 家长评分不污染客观正确率）
+	ConfirmSession(ctx context.Context, arg ConfirmSessionParams) (ConfirmSessionRow, error)
 	CountDueReviews(ctx context.Context, arg CountDueReviewsParams) (int64, error)
 	CountEnWords(ctx context.Context, arg CountEnWordsParams) (int64, error)
 	CountHanzi(ctx context.Context, arg CountHanziParams) (int64, error)
 	CountMastered(ctx context.Context, childID uuid.UUID) (int64, error)
+	// 本次会话里「今天第一次学到」的知识点数，用于 daily_stats.actual_new
+	CountNewLearnedToday(ctx context.Context, arg CountNewLearnedTodayParams) (int64, error)
 	CountPlanForChild(ctx context.Context, childID uuid.UUID) (int64, error)
 	CountReviewQueue(ctx context.Context, arg CountReviewQueueParams) (int64, error)
 	CountStories(ctx context.Context, arg CountStoriesParams) (int64, error)
@@ -33,6 +37,8 @@ type Querier interface {
 	// ---------------------------------------------------------------- 掌握度
 	GetMastery(ctx context.Context, arg GetMasteryParams) (GetMasteryRow, error)
 	GetMathTemplateByCode(ctx context.Context, code string) (GetMathTemplateByCodeRow, error)
+	// 家长控制：额度与开关（§4.2 步骤 1）。查不到就用默认值，不报错。
+	GetParentSettings(ctx context.Context, parentID uuid.UUID) (GetParentSettingsRow, error)
 	GetReviewByID(ctx context.Context, id uuid.UUID) (ContentReview, error)
 	GetSession(ctx context.Context, arg GetSessionParams) (GetSessionRow, error)
 	GetSessionItem(ctx context.Context, arg GetSessionItemParams) (SessionItem, error)
@@ -77,8 +83,11 @@ type Querier interface {
 	LoadEnWordsByKPs(ctx context.Context, kpIds []uuid.UUID) ([]LoadEnWordsByKPsRow, error)
 	LoadHanziByKPs(ctx context.Context, kpIds []uuid.UUID) ([]LoadHanziByKPsRow, error)
 	LoadMathTemplatesByKPs(ctx context.Context, kpIds []uuid.UUID) ([]LoadMathTemplatesByKPsRow, error)
+	LoadStoriesByKPs(ctx context.Context, kpIds []uuid.UUID) ([]LoadStoriesByKPsRow, error)
 	MarkAssignmentDone(ctx context.Context, arg MarkAssignmentDoneParams) error
 	PublishStory(ctx context.Context, id uuid.UUID) (int64, error)
+	// 难度自适应用：取最近 n 次作答的正确与否与用时（§4.2「连 3 次正确率<60% 降档」）
+	RecentAnswers(ctx context.Context, arg RecentAnswersParams) ([]RecentAnswersRow, error)
 	RejectStory(ctx context.Context, id uuid.UUID) (int64, error)
 	SessionCounts(ctx context.Context, sessionID uuid.UUID) (SessionCountsRow, error)
 	// 今日已用秒数：未结束的会话按「到现在」计，保证额度校验不会因忘记 finish 而失效

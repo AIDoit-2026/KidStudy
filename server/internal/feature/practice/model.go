@@ -219,3 +219,48 @@ func ComputeStars(accuracy float64, usedHint bool) int {
 
 // Now 是可替换的时间源，方便测试固定时间。
 var Now = time.Now
+
+// Session 是学习会话领域模型。
+type Session struct {
+	ID            uuid.UUID
+	ChildID       uuid.UUID
+	DeviceType    string
+	StartedAt     time.Time
+	EndedAt       *time.Time
+	DurationSec   int
+	QuestionCount int
+	AnsweredCount int
+	CorrectCount  int
+	SkippedCount  int
+	StarCount     int
+	CompletedBy   string
+	ParentScore   *int
+	ParentNote    string
+	Status        string
+}
+
+// Item 是会话中的一道题（含答案，只在服务端流转）。
+type Item struct {
+	ID           uuid.UUID
+	SessionID    uuid.UUID
+	Seq          int
+	KPID         uuid.UUID
+	SubjectCode  string
+	StageCode    string
+	QuestionType string
+	Difficulty   int
+	Snapshot     Question
+	Key          AnswerKey
+	State        string
+	IsCorrect    *bool
+	UsedHint     bool
+	ElapsedMS    int
+	AnsweredAt   *time.Time
+}
+
+// ParentSettings 是编排时要用到的家长控制项。
+type ParentSettings struct {
+	DailyLimitMin        int
+	SubjectSwitches      map[string]bool
+	RequireParentConfirm bool
+}

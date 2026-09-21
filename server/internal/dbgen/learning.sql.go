@@ -12,6 +12,77 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const confirmSession = `-- name: ConfirmSession :one
+UPDATE learning_sessions SET
+    parent_score = $1,
+    parent_note  = $2,
+    completed_by = COALESCE($3, learning_sessions.completed_by),
+    status       = CASE WHEN status = 'active' THEN 'finished' ELSE status END,
+    updated_at   = $4
+WHERE id = $5 AND child_id = $6
+RETURNING id, child_id, device_type, started_at, ended_at, duration_sec, question_count,
+          answered_count, correct_count, skipped_count, star_count, completed_by,
+          parent_score, parent_note, status
+`
+
+type ConfirmSessionParams struct {
+	ParentScore pgtype.Int2        `json:"parent_score"`
+	ParentNote  pgtype.Text        `json:"parent_note"`
+	CompletedBy pgtype.Text        `json:"completed_by"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID          uuid.UUID          `json:"id"`
+	ChildID     uuid.UUID          `json:"child_id"`
+}
+
+type ConfirmSessionRow struct {
+	ID            uuid.UUID          `json:"id"`
+	ChildID       uuid.UUID          `json:"child_id"`
+	DeviceType    string             `json:"device_type"`
+	StartedAt     pgtype.Timestamptz `json:"started_at"`
+	EndedAt       pgtype.Timestamptz `json:"ended_at"`
+	DurationSec   int32              `json:"duration_sec"`
+	QuestionCount int32              `json:"question_count"`
+	AnsweredCount int32              `json:"answered_count"`
+	CorrectCount  int32              `json:"correct_count"`
+	SkippedCount  int32              `json:"skipped_count"`
+	StarCount     int32              `json:"star_count"`
+	CompletedBy   pgtype.Text        `json:"completed_by"`
+	ParentScore   pgtype.Int2        `json:"parent_score"`
+	ParentNote    pgtype.Text        `json:"parent_note"`
+	Status        string             `json:"status"`
+}
+
+// 家长确认/补录：主观项评分写这里，客观计数一个都不动（§4.11 家长评分不污染客观正确率）
+func (q *Queries) ConfirmSession(ctx context.Context, arg ConfirmSessionParams) (ConfirmSessionRow, error) {
+	row := q.db.QueryRow(ctx, confirmSession,
+		arg.ParentScore,
+		arg.ParentNote,
+		arg.CompletedBy,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.ChildID,
+	)
+	var i ConfirmSessionRow
+	err := row.Scan(
+		&i.ID,
+		&i.ChildID,
+		&i.DeviceType,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.DurationSec,
+		&i.QuestionCount,
+		&i.AnsweredCount,
+		&i.CorrectCount,
+		&i.SkippedCount,
+		&i.StarCount,
+		&i.CompletedBy,
+		&i.ParentScore,
+		&i.ParentNote,
+		&i.Status,
+	)
+	return i, err
+}
+
 const countDueReviews = `-- name: CountDueReviews :one
 SELECT count(*)::bigint
 FROM mastery_records m
@@ -43,6 +114,29 @@ WHERE child_id = $1 AND level >= 3
 
 func (q *Queries) CountMastered(ctx context.Context, childID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countMastered, childID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countNewLearnedToday = `-- name: CountNewLearnedToday :one
+SELECT count(*)::bigint
+FROM mastery_records
+WHERE child_id = $1
+  AND kp_id = ANY($2::uuid[])
+  AND first_learned_at >= $3
+  AND first_learned_at < $3 + interval '1 day'
+`
+
+type CountNewLearnedTodayParams struct {
+	ChildID  uuid.UUID          `json:"child_id"`
+	KpIds    []uuid.UUID        `json:"kp_ids"`
+	DayStart pgtype.Timestamptz `json:"day_start"`
+}
+
+// 本次会话里「今天第一次学到」的知识点数，用于 daily_stats.actual_new
+func (q *Queries) CountNewLearnedToday(ctx context.Context, arg CountNewLearnedTodayParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countNewLearnedToday, arg.ChildID, arg.KpIds, arg.DayStart)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -284,6 +378,39 @@ func (q *Queries) GetMathTemplateByCode(ctx context.Context, code string) (GetMa
 		&i.DifficultyBand,
 		&i.GeneratorConfig,
 		&i.DisplayConfig,
+	)
+	return i, err
+}
+
+const getParentSettings = `-- name: GetParentSettings :one
+SELECT parent_id, daily_limit_min, session_limit_min, rest_interval_min, subject_switches,
+       require_parent_confirm, pace_mode
+FROM parent_settings
+WHERE parent_id = $1
+`
+
+type GetParentSettingsRow struct {
+	ParentID             uuid.UUID `json:"parent_id"`
+	DailyLimitMin        int32     `json:"daily_limit_min"`
+	SessionLimitMin      int32     `json:"session_limit_min"`
+	RestIntervalMin      int32     `json:"rest_interval_min"`
+	SubjectSwitches      []byte    `json:"subject_switches"`
+	RequireParentConfirm bool      `json:"require_parent_confirm"`
+	PaceMode             string    `json:"pace_mode"`
+}
+
+// 家长控制：额度与开关（§4.2 步骤 1）。查不到就用默认值，不报错。
+func (q *Queries) GetParentSettings(ctx context.Context, parentID uuid.UUID) (GetParentSettingsRow, error) {
+	row := q.db.QueryRow(ctx, getParentSettings, parentID)
+	var i GetParentSettingsRow
+	err := row.Scan(
+		&i.ParentID,
+		&i.DailyLimitMin,
+		&i.SessionLimitMin,
+		&i.RestIntervalMin,
+		&i.SubjectSwitches,
+		&i.RequireParentConfirm,
+		&i.PaceMode,
 	)
 	return i, err
 }
@@ -829,13 +956,15 @@ WHERE p.child_id = $1
   AND p.subject_code = $2
   AND m.id IS NULL
   AND k.status = 'published'
+  AND ($3::text = '' OR k.kind = $3::text)
 ORDER BY p.planned_day_index, k.code
-LIMIT $3
+LIMIT $4
 `
 
 type ListNewKPsByPlanParams struct {
 	ChildID     uuid.UUID `json:"child_id"`
 	SubjectCode string    `json:"subject_code"`
+	Kind        string    `json:"kind"`
 	Lim         int32     `json:"lim"`
 }
 
@@ -853,7 +982,12 @@ type ListNewKPsByPlanRow struct {
 
 // 新学候选（基准线驱动）：按标准节奏的 Day 序号取还没学过的 kp（§4.2 步骤 4）
 func (q *Queries) ListNewKPsByPlan(ctx context.Context, arg ListNewKPsByPlanParams) ([]ListNewKPsByPlanRow, error) {
-	rows, err := q.db.Query(ctx, listNewKPsByPlan, arg.ChildID, arg.SubjectCode, arg.Lim)
+	rows, err := q.db.Query(ctx, listNewKPsByPlan,
+		arg.ChildID,
+		arg.SubjectCode,
+		arg.Kind,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -889,14 +1023,16 @@ FROM knowledge_points k
 WHERE k.subject_code = $1
   AND k.status = 'published'
   AND ($2::text = '' OR k.stage_code = $2::text)
-  AND NOT EXISTS (SELECT 1 FROM mastery_records m WHERE m.child_id = $3 AND m.kp_id = k.id)
+  AND ($3::text = '' OR k.kind = $3::text)
+  AND NOT EXISTS (SELECT 1 FROM mastery_records m WHERE m.child_id = $4 AND m.kp_id = k.id)
 ORDER BY k.stage_code, k.difficulty, k.code
-LIMIT $4
+LIMIT $5
 `
 
 type ListNewKPsByStageParams struct {
 	SubjectCode string    `json:"subject_code"`
 	StageCode   string    `json:"stage_code"`
+	Kind        string    `json:"kind"`
 	ChildID     uuid.UUID `json:"child_id"`
 	Lim         int32     `json:"lim"`
 }
@@ -918,6 +1054,7 @@ func (q *Queries) ListNewKPsByStage(ctx context.Context, arg ListNewKPsByStagePa
 	rows, err := q.db.Query(ctx, listNewKPsByStage,
 		arg.SubjectCode,
 		arg.StageCode,
+		arg.Kind,
 		arg.ChildID,
 		arg.Lim,
 	)
@@ -1274,6 +1411,49 @@ func (q *Queries) LoadMathTemplatesByKPs(ctx context.Context, kpIds []uuid.UUID)
 	return items, nil
 }
 
+const loadStoriesByKPs = `-- name: LoadStoriesByKPs :many
+SELECT k.id AS kp_id, s.id AS story_id, s.title, s.summary, s.lang, s.level_code
+FROM knowledge_points k
+JOIN stories s ON s.id = k.ref_id
+WHERE k.id = ANY($1::uuid[]) AND k.kind = 'story'
+`
+
+type LoadStoriesByKPsRow struct {
+	KpID      uuid.UUID   `json:"kp_id"`
+	StoryID   uuid.UUID   `json:"story_id"`
+	Title     string      `json:"title"`
+	Summary   pgtype.Text `json:"summary"`
+	Lang      string      `json:"lang"`
+	LevelCode pgtype.Text `json:"level_code"`
+}
+
+func (q *Queries) LoadStoriesByKPs(ctx context.Context, kpIds []uuid.UUID) ([]LoadStoriesByKPsRow, error) {
+	rows, err := q.db.Query(ctx, loadStoriesByKPs, kpIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LoadStoriesByKPsRow{}
+	for rows.Next() {
+		var i LoadStoriesByKPsRow
+		if err := rows.Scan(
+			&i.KpID,
+			&i.StoryID,
+			&i.Title,
+			&i.Summary,
+			&i.Lang,
+			&i.LevelCode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markAssignmentDone = `-- name: MarkAssignmentDone :exec
 UPDATE practice_assignments SET status = 'done', used_at = now()
 WHERE child_id = $1 AND kp_id = ANY($2::uuid[])
@@ -1287,6 +1467,46 @@ type MarkAssignmentDoneParams struct {
 func (q *Queries) MarkAssignmentDone(ctx context.Context, arg MarkAssignmentDoneParams) error {
 	_, err := q.db.Exec(ctx, markAssignmentDone, arg.ChildID, arg.KpIds)
 	return err
+}
+
+const recentAnswers = `-- name: RecentAnswers :many
+SELECT is_correct, elapsed_ms
+FROM answer_logs
+WHERE child_id = $1 AND kp_id = $2
+ORDER BY created_at DESC, id DESC
+LIMIT $3
+`
+
+type RecentAnswersParams struct {
+	ChildID uuid.UUID `json:"child_id"`
+	KpID    uuid.UUID `json:"kp_id"`
+	Limit   int32     `json:"limit"`
+}
+
+type RecentAnswersRow struct {
+	IsCorrect bool  `json:"is_correct"`
+	ElapsedMs int32 `json:"elapsed_ms"`
+}
+
+// 难度自适应用：取最近 n 次作答的正确与否与用时（§4.2「连 3 次正确率<60% 降档」）
+func (q *Queries) RecentAnswers(ctx context.Context, arg RecentAnswersParams) ([]RecentAnswersRow, error) {
+	rows, err := q.db.Query(ctx, recentAnswers, arg.ChildID, arg.KpID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RecentAnswersRow{}
+	for rows.Next() {
+		var i RecentAnswersRow
+		if err := rows.Scan(&i.IsCorrect, &i.ElapsedMs); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const sessionCounts = `-- name: SessionCounts :one
@@ -1631,7 +1851,11 @@ VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (child_id, kp_id) DO UPDATE SET
     cleared_at          = EXCLUDED.cleared_at,
     consecutive_correct = EXCLUDED.consecutive_correct,
-    wrong_count         = wrong_book_entries.wrong_count + 1,
+    -- 只在「再次答错」时累加错误次数并重置入本时间；单纯移出错题本不该动这两个字段
+    wrong_count         = CASE WHEN EXCLUDED.cleared_at IS NULL
+                               THEN wrong_book_entries.wrong_count + 1
+                               ELSE wrong_book_entries.wrong_count END,
+    added_at            = CASE WHEN EXCLUDED.cleared_at IS NULL THEN now() ELSE wrong_book_entries.added_at END,
     updated_at          = now()
 RETURNING id, child_id, kp_id, added_at, cleared_at, consecutive_correct, wrong_count
 `

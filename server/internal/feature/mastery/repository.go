@@ -127,6 +127,15 @@ func (r *Repository) CountDue(ctx context.Context, childID uuid.UUID, subject st
 	})
 }
 
+// Exists 判断知识点是否存在。重置接口靠它区分「没学过」与「根本没这个知识点」。
+func (r *Repository) Exists(ctx context.Context, kpID uuid.UUID) (bool, error) {
+	rows, err := r.q.ListKPsByIDs(ctx, []uuid.UUID{kpID})
+	if err != nil {
+		return false, err
+	}
+	return len(rows) > 0, nil
+}
+
 // RecentAnswers 取最近 n 次作答，供难度自适应统计。
 func (r *Repository) RecentAnswers(ctx context.Context, childID, kpID uuid.UUID, n int) ([]bool, []int, error) {
 	rows, err := r.q.RecentAnswers(ctx, dbgen.RecentAnswersParams{ChildID: childID, KpID: kpID, Limit: int32(n)})
@@ -192,6 +201,7 @@ func (r *Repository) ListWrongBook(ctx context.Context, childID uuid.UUID, openO
 			ID:                 row.ID,
 			KPID:               row.KpID,
 			SubjectCode:        row.SubjectCode,
+			Kind:               row.Kind,
 			Code:               row.Code,
 			Name:               row.Name,
 			WrongCount:         int(row.WrongCount),

@@ -102,7 +102,15 @@ func (s *Service) ApplyResult(ctx context.Context, childID, kpID uuid.UUID, corr
 	} else {
 		rec.Difficulty, delta = newLevel, changed
 	}
-	rec.NextReviewAt = now.Add(time.Duration(rec.IntervalHours * float64(time.Hour)))
+	// 复习时刻按「答对用阶梯间隔、答错固定 10 分钟」算，展示用的分钟数再从实际时长反推。
+	// 不用 interval_hours * 60 反算：0.17 小时其实是 10.2 分钟，取整后会显示成 11 分钟。
+	var until time.Duration
+	if correct {
+		until = time.Duration(rec.IntervalHours * float64(time.Hour))
+	} else {
+		until = WrongReappearAfter
+	}
+	rec.NextReviewAt = now.Add(until)
 
 	if _, err := s.repo.Upsert(ctx, childID, rec); err != nil {
 		return Result{}, err
@@ -119,7 +127,7 @@ func (s *Service) ApplyResult(ctx context.Context, childID, kpID uuid.UUID, corr
 		Ease:                round2(rec.Ease),
 		IntervalHours:       round2(rec.IntervalHours),
 		NextReviewAt:        rec.NextReviewAt.UTC().Format(time.RFC3339),
-		NextReviewInMinutes: int(math.Ceil(rec.IntervalHours * 60)),
+		NextReviewInMinutes: int(math.Ceil(until.Minutes())),
 		Difficulty:          rec.Difficulty,
 		Streak:              rec.Streak,
 		WrongStreak:         rec.WrongStreak,
@@ -272,6 +280,15 @@ func (s *Service) RemoveWrongEntry(ctx context.Context, childID, id uuid.UUID) e
 // Reset 重置单个知识点：清掌握度，同时把错题本里对应的条目一并清掉，
 // 否则重置后它还会被「错题优先」顶到今日任务最前面。
 func (s *Service) Reset(ctx context.Context, childID, kpID uuid.UUID) error {
+	// 先确认知识点真的存在：否则「没学过」和「没这个知识点」都会静默成功，
+	// 家长点了重置却毫无反应，最难排查。
+	exists, err := s.repo.Exists(ctx, kpID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return ErrNotFound
+	}
 	if err := s.repo.Delete(ctx, childID, kpID); err != nil {
 		return fmt.Errorf("重置掌握度失败: %w", err)
 	}

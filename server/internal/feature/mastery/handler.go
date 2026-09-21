@@ -2,6 +2,7 @@ package mastery
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -116,6 +117,10 @@ func (h *Handler) reset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.Reset(r.Context(), childID, kpID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Error(w, r, h.log, errNotFound)
+			return
+		}
 		response.Error(w, r, h.log, err)
 		return
 	}

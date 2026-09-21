@@ -18,6 +18,8 @@ import (
 	"kidstudy/internal/feature/auth"
 	"kidstudy/internal/feature/children"
 	"kidstudy/internal/feature/content"
+	"kidstudy/internal/feature/mastery"
+	"kidstudy/internal/feature/practice"
 	"kidstudy/internal/feature/review"
 	"kidstudy/internal/feature/system"
 	platformauth "kidstudy/internal/platform/auth"
@@ -42,18 +44,24 @@ func registerFeatures(r chi.Router, cfg config.Config, log *slog.Logger, db *pos
 	authSvc := auth.NewService(auth.NewRepository(db.Pool()), tokens, cfg, log)
 	authH := auth.NewHandler(authSvc, cfg, log)
 
-	childrenH := children.NewHandler(
-		children.NewService(children.NewRepository(db.Pool())),
-		log,
-	)
+	childrenSvc := children.NewService(children.NewRepository(db.Pool()))
+	childrenH := children.NewHandler(childrenSvc, log)
 
-	contentH := content.NewHandler(
-		content.NewService(content.NewRepository(db.Pool()), log),
-		log,
-	)
+	contentSvc := content.NewService(content.NewRepository(db.Pool()), log)
+	contentH := content.NewHandler(contentSvc, log)
 
 	reviewH := review.NewHandler(
 		review.NewService(review.NewRepository(db.Pool()), log),
+		log,
+	)
+
+	// mastery 先于 practice 构造：practice 判分时要调它的状态机
+	masterySvc := mastery.NewService(mastery.NewRepository(db.Pool()), log)
+	masteryH := mastery.NewHandler(masterySvc, childrenSvc, log)
+
+	practiceH := practice.NewHandler(
+		practice.NewService(practice.NewRepository(db.Pool()), masterySvc, contentSvc, log),
+		childrenSvc,
 		log,
 	)
 
@@ -66,6 +74,8 @@ func registerFeatures(r chi.Router, cfg config.Config, log *slog.Logger, db *pos
 			childrenH.Register(r)
 			contentH.Register(r)
 			reviewH.Register(r)
+			masteryH.Register(r)
+			practiceH.Register(r)
 		})
 	})
 }
