@@ -45,7 +45,7 @@ type ItemView struct {
 	Summary     string   `json:"summary,omitempty"`
 	Source      string   `json:"source,omitempty"`
 	SourceURL   string   `json:"source_url,omitempty"`
-	Hits        []string `json:"hits,omitempty"`
+	Hits        []string `json:"hits"`  // 恒返回（空数组表示未命中），前端据此渲染「无命中」
 	Status      string   `json:"status"`
 	LevelCode   string   `json:"level_code,omitempty"`
 	CharCount   int32    `json:"char_count,omitempty"`
