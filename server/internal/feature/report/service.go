@@ -21,6 +21,8 @@ var (
 	errBadSubject      = apperr.BadRequest("学科必须是 chinese / math / english 之一")
 	errNoChild         = apperr.BadRequest("至少要指定一个孩子")
 	errTooManyChildren = apperr.BadRequest("一次最多对比 4 个孩子")
+	// 对比时混入别人的孩子：与其它接口一致，回 404 而不是 403，不泄露 ID 是否存在
+	errChildNotOwned = apperr.NotFound("孩子不存在或不属于当前家长")
 )
 
 // Service 承载报表口径、建议规则与措辞。

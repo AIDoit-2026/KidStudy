@@ -199,7 +199,7 @@ func (s *Service) deviationDays(ctx context.Context, childID uuid.UUID, subject 
 	if planned == nil {
 		return 0, nil
 	}
-	return day.Sub(*planned).Hours() / 24, nil
+	return daysBetween(day, *planned), nil
 }
 
 // childrenFor 取要处理的孩子：显式给出就用它，否则全量。

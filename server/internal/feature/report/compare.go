@@ -39,7 +39,7 @@ func (s *Service) Compare(ctx context.Context, parentID uuid.UUID, childIDs []uu
 	}
 	if len(infos) != len(dedupe(childIDs)) {
 		// 有 ID 不属于当前家长或不存在 —— 一律 404，不区分是哪种
-		return CompareView{}, ErrNotFound
+		return CompareView{}, errChildNotOwned
 	}
 
 	type childSeries struct {

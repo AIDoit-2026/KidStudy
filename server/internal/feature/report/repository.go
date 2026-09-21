@@ -162,9 +162,19 @@ func (r *Repository) plannedDeviation(ctx context.Context, childID uuid.UUID, su
 	if err != nil || pd == nil {
 		return nil, err
 	}
-	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	v := day.Sub(*pd).Hours() / 24
+	v := daysBetween(now, *pd)
 	return &v, nil
+}
+
+// daysBetween 两个「日期」相差几天。
+//
+// pgx 把 date 扫进来时给的是 UTC 零点，本机是 +08，直接用本地零点相减会差出
+// 8 小时（表现为 -0.33 天这种脏值）。这里把两边都归一到同一时区的零点再算。
+func daysBetween(a, b time.Time) float64 {
+	loc := a.Location()
+	da := time.Date(a.Year(), a.Month(), a.Day(), 0, 0, 0, 0, loc)
+	db := time.Date(b.Year(), b.Month(), b.Day(), 0, 0, 0, 0, loc)
+	return da.Sub(db).Hours() / 24
 }
 
 // ---------------------------------------------------------------- 多孩对比
