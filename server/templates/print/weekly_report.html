@@ -1,0 +1,43 @@
+{{define "pagecss"}}<style>@page { size: {{.Meta.Paper}}; margin: 15mm; }</style>{{end}}
+
+{{define "content"}}
+{{if .Items}}
+<div class="summary-line">
+    {{range .Items}}
+    <div class="metric">
+        <div class="k">{{.Sub}}</div>
+        <div class="k-v">{{.Main}}</div>
+    </div>
+    {{end}}
+</div>
+{{end}}
+
+{{if .Sheets}}
+{{range .Sheets}}
+<section class="section">
+    <div class="section-title">{{.Title}}</div>
+    {{if .Note}}<div class="note">{{.Note}}</div>{{end}}
+    {{if .Head}}
+    <table class="report">
+        <thead>
+            <tr>{{range .Head}}<th>{{.}}</th>{{end}}</tr>
+        </thead>
+        <tbody>
+            {{range .Rows}}
+            <tr>{{range .}}<td>{{.}}</td>{{end}}</tr>
+            {{end}}
+        </tbody>
+    </table>
+    {{else}}
+    <div class="drill cols-1">
+        {{range .Rows}}
+        <div class="q">{{index . 0}}</div>
+        {{end}}
+    </div>
+    {{end}}
+</section>
+{{end}}
+{{else}}
+<div class="empty-hint">这段时间还没有学习记录，先陪孩子做一次练习吧</div>
+{{end}}
+{{end}}

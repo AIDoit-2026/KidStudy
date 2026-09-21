@@ -1,0 +1,19 @@
+{{define "pagecss"}}<style>@page { size: {{.Meta.Paper}}; margin: 15mm; }</style>{{end}}
+
+{{define "content"}}
+{{if .Items}}
+<div class="note">先描上格的淡色字母，再在下格自己写。注意小写字母的出头与下伸。</div>
+<div class="card-grid cols-2" style="gap:4mm;">
+    {{range .Items}}
+    <div class="card" style="padding:1.5mm;">
+        <div class="fgrid" style="height:14mm;">
+            <span class="fgrid-text" style="font-size:{{$.Options.FontSize}}pt;">{{.Main}}</span>
+        </div>
+        <div class="fgrid" style="height:14mm;margin-top:1.2mm;"></div>
+    </div>
+    {{end}}
+</div>
+{{else}}
+<div class="empty-hint">没有生成字母，请检查大小写与数量设置</div>
+{{end}}
+{{end}}

@@ -1,0 +1,403 @@
+/* 打印中心共享样式（§4.6 排版要点）。
+ *
+ * 三条硬约束：
+ *  1. 白底黑字高对比 —— 打印机是单色激光也照样清楚，不用任何灰度底纹做信息载体。
+ *  2. break-inside: avoid —— 一张卡片 / 一道题绝不被撕到两页（「A4 预览无截断」的验收点）。
+ *  3. 屏幕与纸张物理隔离 —— 工具栏只在屏幕显示；纸张视图不加载任何屏幕布局类，
+ *     所以「屏幕上看到的就是打出来的」，PDF 走同一份 HTML 亦然。
+ *
+ * 字体走开源楷体 LXGW WenKai，本机没装时依次回落到系统楷体，最后才用无衬线，
+ * 保证任何环境都不会退回默认宋体那种偏小的字面。
+ */
+
+@page {
+    size: A4;
+    margin: 15mm;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    background: #fff;
+    color: #111;
+}
+
+body {
+    font-family: "LXGW WenKai", "LXGW WenKai Screen", "KaiTi", "STKaiti", "Kaiti SC",
+        "Microsoft YaHei", -apple-system, sans-serif;
+    font-size: 12pt;
+    line-height: 1.6;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+
+:root {
+    --ink: #111;
+    --line: #333;
+    --faint: #c8c8c8;
+    --guide: #d98b8b;
+    --gap: 6mm;
+}
+
+/* ------------------------------------------------------------ 屏幕独占控件 */
+
+.screen-only {
+    display: block;
+}
+
+@media print {
+    .screen-only {
+        display: none !important;
+    }
+}
+
+.toolbar {
+    position: fixed;
+    right: 12px;
+    bottom: 12px;
+    z-index: 99;
+    display: flex;
+    gap: 8px;
+}
+
+.toolbar button {
+    padding: 8px 16px;
+    font-size: 14px;
+    font-family: inherit;
+    color: #fff;
+    background: #2f6fed;
+    border: 0;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.toolbar button.ghost {
+    background: #6b7280;
+}
+
+/* ------------------------------------------------------------ 页眉页脚 */
+
+.sheet-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8mm;
+    padding-bottom: 2mm;
+    margin-bottom: 4mm;
+    border-bottom: 1.5px solid var(--line);
+}
+
+.sheet-head .head-title {
+    font-size: 1.35em;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.sheet-head .head-meta {
+    display: flex;
+    gap: 4mm;
+    font-size: 0.85em;
+    color: #444;
+    white-space: nowrap;
+}
+
+.sheet-foot {
+    display: flex;
+    justify-content: space-between;
+    gap: 6mm;
+    margin-top: 4mm;
+    padding-top: 2mm;
+    border-top: 1px solid #bbb;
+    font-size: 0.75em;
+    color: #666;
+}
+
+/* 落款区：页码与生成信息只在纸张上出现，不占版面高度 */
+
+/* ------------------------------------------------------------ 通用块 */
+
+.section {
+    margin: 0 0 5mm;
+    break-inside: avoid;
+}
+
+.section-title {
+    margin: 0 0 2mm;
+    padding-bottom: 1mm;
+    font-size: 1.05em;
+    font-weight: 700;
+    border-bottom: 1px dashed var(--line);
+}
+
+.note {
+    margin: 0 0 3mm;
+    font-size: 0.85em;
+    color: #555;
+}
+
+.empty-hint {
+    padding: 12mm 0;
+    text-align: center;
+    color: #777;
+    border: 1px dashed #bbb;
+    border-radius: 3mm;
+}
+
+/* 答案页：独立一节，永远从新的一页开始（孩子那份只要不打印这一节即可） */
+.answer-section {
+    break-before: page;
+    page-break-before: always;
+}
+
+.answer-section .section-title::after {
+    content: "（家长版）";
+    margin-left: 2mm;
+    font-size: 0.8em;
+    font-weight: 400;
+    color: #666;
+}
+
+/* ------------------------------------------------------------ 卡片网格 */
+
+.card-grid {
+    display: grid;
+    gap: var(--gap);
+}
+
+.card-grid.cols-1 { grid-template-columns: repeat(1, 1fr); }
+.card-grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
+.card-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.card-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+.card-grid.cols-5 { grid-template-columns: repeat(5, 1fr); }
+.card-grid.cols-6 { grid-template-columns: repeat(6, 1fr); }
+
+.card {
+    border: 1px solid var(--line);
+    border-radius: 2mm;
+    padding: 2mm;
+    text-align: center;
+    break-inside: avoid;
+}
+
+.card .card-sub {
+    font-size: 0.6em;
+    color: #444;
+    letter-spacing: 0.06em;
+    line-height: 1.2;
+    min-height: 1.2em;
+}
+
+.card .card-main {
+    line-height: 1.1;
+}
+
+.card .card-foot {
+    font-size: 0.5em;
+    color: #666;
+    line-height: 1.3;
+}
+
+/* 田字格：十字辅助线用淡红，是描红本的通用视觉语言 */
+.tzg {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    border: 1px solid var(--line);
+    background-image:
+        linear-gradient(to right, transparent calc(50% - 0.4mm), var(--guide) calc(50% - 0.4mm),
+            var(--guide) calc(50% + 0.4mm), transparent calc(50% + 0.4mm)),
+        linear-gradient(to bottom, transparent calc(50% - 0.4mm), var(--guide) calc(50% - 0.4mm),
+            var(--guide) calc(50% + 0.4mm), transparent calc(50% + 0.4mm));
+}
+
+/* 描红用淡字：够淡能描，又够清楚不跑形 */
+.tzg .trace-char {
+    color: var(--faint);
+}
+
+.tzg.center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 四线三格：上下实线为界，中间两条虚线是基准 */
+.fgrid {
+    position: relative;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    background-image:
+        linear-gradient(to bottom, transparent calc(33.33% - 0.3mm), var(--guide) calc(33.33% - 0.3mm),
+            var(--guide) calc(33.33% + 0.3mm), transparent calc(33.33% + 0.3mm)),
+        linear-gradient(to bottom, transparent calc(66.66% - 0.3mm), var(--guide) calc(66.66% - 0.3mm),
+            var(--guide) calc(66.66% + 0.3mm), transparent calc(66.66% + 0.3mm));
+}
+
+.fgrid .fgrid-text {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    padding-left: 2mm;
+    color: var(--faint);
+}
+
+/* ------------------------------------------------------------ 题目列表 */
+
+.drill {
+    display: grid;
+    gap: 5mm 6mm;
+}
+
+.drill.cols-1 { grid-template-columns: repeat(1, 1fr); }
+.drill.cols-2 { grid-template-columns: repeat(2, 1fr); }
+.drill.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.drill.cols-4 { grid-template-columns: repeat(4, 1fr); }
+.drill.cols-5 { grid-template-columns: repeat(5, 1fr); }
+.drill.cols-6 { grid-template-columns: repeat(6, 1fr); }
+
+.drill .q {
+    break-inside: avoid;
+}
+
+.drill .q-no {
+    display: inline-block;
+    min-width: 1.6em;
+    color: #888;
+    font-size: 0.85em;
+}
+
+.drill .q-prompt {
+    white-space: nowrap;
+}
+
+/* 竖式留白：口算题卡勾选「留竖式空位」时用，给足写草稿的高度 */
+.drill .q-blank {
+    height: 14mm;
+    border-bottom: 1px solid #ccc;
+}
+
+/* ------------------------------------------------------------ 连线题 */
+
+.match-wrap {
+    display: grid;
+    grid-template-columns: 1fr 14mm 1fr;
+    gap: 0 4mm;
+}
+
+.match-col {
+    display: flex;
+    flex-direction: column;
+    gap: 6mm;
+}
+
+.match-col .match-item {
+    display: flex;
+    align-items: center;
+    gap: 3mm;
+    break-inside: avoid;
+}
+
+.match-col.right .match-item {
+    flex-direction: row-reverse;
+}
+
+.match-dot {
+    flex: 0 0 3mm;
+    width: 3mm;
+    height: 3mm;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+}
+
+.match-item .txt {
+    flex: 1 1 auto;
+    padding: 1.5mm 0;
+    text-align: center;
+}
+
+/* ------------------------------------------------------------ 表格（周报告） */
+
+table.report {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9em;
+    break-inside: avoid;
+}
+
+table.report th,
+table.report td {
+    padding: 1.5mm 2mm;
+    border: 1px solid #999;
+    text-align: left;
+}
+
+table.report th {
+    background: #f2f2f2;
+    font-weight: 700;
+}
+
+/* 条形对比：用纯黑实心块表达比例，单色打印也能读出差距 */
+.bar {
+    position: relative;
+    height: 4mm;
+    background: #eee;
+    border: 1px solid #bbb;
+}
+
+.bar > i {
+    display: block;
+    height: 100%;
+    background: #333;
+}
+
+.summary-line {
+    display: flex;
+    gap: 8mm;
+    flex-wrap: wrap;
+    margin-bottom: 4mm;
+}
+
+.summary-line .metric {
+    min-width: 28mm;
+}
+
+.summary-line .metric .k {
+    font-size: 0.78em;
+    color: #666;
+}
+
+.summary-line .k-v {
+    font-size: 1.3em;
+    font-weight: 700;
+}
+
+/* ------------------------------------------------------------ 故事小册子 */
+
+.story-body p {
+    margin: 0 0 3mm;
+    text-indent: 2em;
+}
+
+.story-question {
+    margin: 0 0 2mm;
+}
+
+.story-question .q-idx {
+    font-weight: 700;
+    margin-right: 1.5mm;
+}
+
+/* ------------------------------------------------------------ 纸张尺寸变体 */
+
+body.paper-A5 .sheet-head .head-title {
+    font-size: 1.2em;
+}
+
+body.paper-A5 {
+    font-size: 11pt;
+}

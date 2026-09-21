@@ -61,6 +61,21 @@ func (q *Queries) ClaimPrintJobs(ctx context.Context, lim int32) ([]ClaimPrintJo
 	return items, nil
 }
 
+const clearPrintJobPDF = `-- name: ClearPrintJobPDF :exec
+UPDATE print_jobs SET
+    pdf_path      = NULL,
+    page_count    = 0,
+    status        = 'created',
+    error_message = '',
+    updated_at    = now()
+WHERE id = $1
+`
+
+func (q *Queries) ClearPrintJobPDF(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearPrintJobPDF, id)
+	return err
+}
+
 const countPrintJobs = `-- name: CountPrintJobs :one
 SELECT count(*)::bigint AS total
 FROM print_jobs
@@ -212,6 +227,48 @@ func (q *Queries) InsertPrintSession(ctx context.Context, arg InsertPrintSession
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const listExpiredPrintJobs = `-- name: ListExpiredPrintJobs :many
+
+SELECT id, pdf_path
+FROM print_jobs
+WHERE pdf_path IS NOT NULL AND created_at < $1
+ORDER BY created_at
+LIMIT $2
+`
+
+type ListExpiredPrintJobsParams struct {
+	Before pgtype.Timestamptz `json:"before"`
+	Lim    int32              `json:"lim"`
+}
+
+type ListExpiredPrintJobsRow struct {
+	ID      uuid.UUID   `json:"id"`
+	PdfPath pgtype.Text `json:"pdf_path"`
+}
+
+// ---------------------------------------------------------------- 保留期清理
+// 超过保留期、PDF 还在的任务。payload 是不可变快照，清掉 PDF 后随时能重新渲染，
+// 所以清理只删文件、不动打印记录本身（家长还能看到「当时印过什么」）。
+func (q *Queries) ListExpiredPrintJobs(ctx context.Context, arg ListExpiredPrintJobsParams) ([]ListExpiredPrintJobsRow, error) {
+	rows, err := q.db.Query(ctx, listExpiredPrintJobs, arg.Before, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListExpiredPrintJobsRow{}
+	for rows.Next() {
+		var i ListExpiredPrintJobsRow
+		if err := rows.Scan(&i.ID, &i.PdfPath); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listPrintJobs = `-- name: ListPrintJobs :many
@@ -393,6 +450,279 @@ func (q *Queries) MarkPrintJobReady(ctx context.Context, arg MarkPrintJobReadyPa
 		&i.Status,
 		&i.PdfPath,
 		&i.PageCount,
+	)
+	return i, err
+}
+
+const printChildBasic = `-- name: PrintChildBasic :one
+
+SELECT id, nickname, stage_code
+FROM children
+WHERE id = $1 AND parent_id = $2 AND active
+`
+
+type PrintChildBasicParams struct {
+	ID       uuid.UUID `json:"id"`
+	ParentID uuid.UUID `json:"parent_id"`
+}
+
+type PrintChildBasicRow struct {
+	ID        uuid.UUID   `json:"id"`
+	Nickname  string      `json:"nickname"`
+	StageCode pgtype.Text `json:"stage_code"`
+}
+
+// ---------------------------------------------------------------- 取数（渲染题面用）
+// 归属校验：parent_id 一起过滤，越权当作不存在（与 children 模块的 404 约定一致）。
+func (q *Queries) PrintChildBasic(ctx context.Context, arg PrintChildBasicParams) (PrintChildBasicRow, error) {
+	row := q.db.QueryRow(ctx, printChildBasic, arg.ID, arg.ParentID)
+	var i PrintChildBasicRow
+	err := row.Scan(&i.ID, &i.Nickname, &i.StageCode)
+	return i, err
+}
+
+const printGetStory = `-- name: PrintGetStory :one
+SELECT id, title, lang, level_code, body_md, questions, discussion, char_count
+FROM stories
+WHERE id = $1 AND status = 'published' AND suitable
+`
+
+type PrintGetStoryRow struct {
+	ID         uuid.UUID   `json:"id"`
+	Title      string      `json:"title"`
+	Lang       string      `json:"lang"`
+	LevelCode  pgtype.Text `json:"level_code"`
+	BodyMd     string      `json:"body_md"`
+	Questions  []byte      `json:"questions"`
+	Discussion []byte      `json:"discussion"`
+	CharCount  int32       `json:"char_count"`
+}
+
+// 故事小册子：指定故事，或按级别挑一篇最短的（篇幅短的更适合一次朗读完）。
+// 只取已发布且通过适宜性筛查的，与孩子端的可见口径保持一致。
+func (q *Queries) PrintGetStory(ctx context.Context, id uuid.UUID) (PrintGetStoryRow, error) {
+	row := q.db.QueryRow(ctx, printGetStory, id)
+	var i PrintGetStoryRow
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Lang,
+		&i.LevelCode,
+		&i.BodyMd,
+		&i.Questions,
+		&i.Discussion,
+		&i.CharCount,
+	)
+	return i, err
+}
+
+const printKPsByStage = `-- name: PrintKPsByStage :many
+SELECT id, subject_code, kind, name, difficulty
+FROM knowledge_points
+WHERE subject_code = $1
+  AND ($2::text = '' OR stage_code = $2::text)
+  AND status = 'published'
+ORDER BY difficulty, code
+LIMIT $3
+`
+
+type PrintKPsByStageParams struct {
+	SubjectCode string `json:"subject_code"`
+	StageCode   string `json:"stage_code"`
+	Lim         int32  `json:"lim"`
+}
+
+type PrintKPsByStageRow struct {
+	ID          uuid.UUID `json:"id"`
+	SubjectCode string    `json:"subject_code"`
+	Kind        string    `json:"kind"`
+	Name        string    `json:"name"`
+	Difficulty  int16     `json:"difficulty"`
+}
+
+// 范围一：按阶段取（家长手动挑「S2 的字」这类）
+func (q *Queries) PrintKPsByStage(ctx context.Context, arg PrintKPsByStageParams) ([]PrintKPsByStageRow, error) {
+	rows, err := q.db.Query(ctx, printKPsByStage, arg.SubjectCode, arg.StageCode, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PrintKPsByStageRow{}
+	for rows.Next() {
+		var i PrintKPsByStageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SubjectCode,
+			&i.Kind,
+			&i.Name,
+			&i.Difficulty,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const printKPsMastered = `-- name: PrintKPsMastered :many
+SELECT kp_id
+FROM mastery_records
+WHERE child_id = $1 AND level >= $2
+ORDER BY COALESCE(mastered_at, first_learned_at) DESC NULLS LAST, kp_id
+LIMIT $3
+`
+
+type PrintKPsMasteredParams struct {
+	ChildID  uuid.UUID `json:"child_id"`
+	MinLevel int16     `json:"min_level"`
+	Lim      int32     `json:"lim"`
+}
+
+// 范围四：已掌握（做闪卡复习用）
+func (q *Queries) PrintKPsMastered(ctx context.Context, arg PrintKPsMasteredParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, printKPsMastered, arg.ChildID, arg.MinLevel, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var kp_id uuid.UUID
+		if err := rows.Scan(&kp_id); err != nil {
+			return nil, err
+		}
+		items = append(items, kp_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const printKPsRecent = `-- name: PrintKPsRecent :many
+SELECT DISTINCT kp_id
+FROM mastery_records
+WHERE child_id = $1
+  AND COALESCE(mastered_at, first_learned_at) IS NOT NULL
+  AND COALESCE(mastered_at, first_learned_at) >= $2
+ORDER BY kp_id
+LIMIT $3
+`
+
+type PrintKPsRecentParams struct {
+	ChildID uuid.UUID          `json:"child_id"`
+	Since   pgtype.Timestamptz `json:"since"`
+	Lim     int32              `json:"lim"`
+}
+
+// 范围二：近期新学（默认「本周」= 近 7 天）—— 时间点由 Go 侧算好传进来，
+// 不在 SQL 里做 now() - interval 的推算，免得 sqlc 对 interval 参数推断出意外类型。
+func (q *Queries) PrintKPsRecent(ctx context.Context, arg PrintKPsRecentParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, printKPsRecent, arg.ChildID, arg.Since, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var kp_id uuid.UUID
+		if err := rows.Scan(&kp_id); err != nil {
+			return nil, err
+		}
+		items = append(items, kp_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const printKPsWrongBook = `-- name: PrintKPsWrongBook :many
+SELECT kp_id
+FROM wrong_book_entries
+WHERE child_id = $1 AND cleared_at IS NULL
+ORDER BY added_at DESC, kp_id
+LIMIT $2
+`
+
+type PrintKPsWrongBookParams struct {
+	ChildID uuid.UUID `json:"child_id"`
+	Lim     int32     `json:"lim"`
+}
+
+// 范围三：错题本（未移出的）
+func (q *Queries) PrintKPsWrongBook(ctx context.Context, arg PrintKPsWrongBookParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, printKPsWrongBook, arg.ChildID, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var kp_id uuid.UUID
+		if err := rows.Scan(&kp_id); err != nil {
+			return nil, err
+		}
+		items = append(items, kp_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const printMathKPByTemplate = `-- name: PrintMathKPByTemplate :one
+SELECT id
+FROM knowledge_points
+WHERE kind = 'math_skill' AND metadata->>'template_code' = $1::text
+LIMIT 1
+`
+
+// 数学题的补录挂点：一道口算题卡属于哪个知识点。数学题的 kp 是「题型档」不是单题，
+// 所以整张卷子补录只推进这一个技能点（§4.6 步骤 6）。用 metadata 里的 template_code
+// 关联，与 M3 播种时的写入口径一致。
+func (q *Queries) PrintMathKPByTemplate(ctx context.Context, templateCode string) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, printMathKPByTemplate, templateCode)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const printPickStory = `-- name: PrintPickStory :one
+SELECT id, title, lang, level_code, body_md, questions, discussion, char_count
+FROM stories
+WHERE status = 'published' AND suitable
+  AND ($1::text = '' OR level_code = $1::text)
+ORDER BY char_count, id
+LIMIT 1
+`
+
+type PrintPickStoryRow struct {
+	ID         uuid.UUID   `json:"id"`
+	Title      string      `json:"title"`
+	Lang       string      `json:"lang"`
+	LevelCode  pgtype.Text `json:"level_code"`
+	BodyMd     string      `json:"body_md"`
+	Questions  []byte      `json:"questions"`
+	Discussion []byte      `json:"discussion"`
+	CharCount  int32       `json:"char_count"`
+}
+
+func (q *Queries) PrintPickStory(ctx context.Context, stageCode string) (PrintPickStoryRow, error) {
+	row := q.db.QueryRow(ctx, printPickStory, stageCode)
+	var i PrintPickStoryRow
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Lang,
+		&i.LevelCode,
+		&i.BodyMd,
+		&i.Questions,
+		&i.Discussion,
+		&i.CharCount,
 	)
 	return i, err
 }

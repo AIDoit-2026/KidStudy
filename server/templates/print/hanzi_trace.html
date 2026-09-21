@@ -1,0 +1,23 @@
+{{define "pagecss"}}<style>@page { size: {{.Meta.Paper}}; margin: 15mm; }</style>{{end}}
+
+{{define "content"}}
+{{if .Items}}
+<div class="note">先照着淡字描一遍，再在后面的空格里自己写。写完可以指着字读一遍拼音。</div>
+<div class="card-grid cols-2">
+    {{range .Items}}
+    <div class="card">
+        {{if $.Options.WithPinyin}}<div class="card-sub">{{.Sub}}</div>{{end}}
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1.5mm;">
+            <div class="tzg center"><span class="trace-char" style="font-size:{{$.Options.FontSize}}pt;line-height:1;">{{.Main}}</span></div>
+            <div class="tzg"></div>
+            <div class="tzg"></div>
+            <div class="tzg"></div>
+        </div>
+        {{if .Extra}}<div class="card-foot">{{range $i, $w := .Extra}}{{if $i}} · {{end}}{{$w}}{{end}}</div>{{end}}
+    </div>
+    {{end}}
+</div>
+{{else}}
+<div class="empty-hint">没有取到可描红的汉字，换个范围或先让孩子学几个字</div>
+{{end}}
+{{end}}

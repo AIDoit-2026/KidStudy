@@ -62,6 +62,22 @@ type Config struct {
 
 	// 关闭公开注册：仅凭邀请码建号（首次启动用 BOOTSTRAP_INVITE_CODE）
 	BootstrapInviteCode string `env:"BOOTSTRAP_INVITE_CODE"`
+
+	// 打印与对象存储（M5）
+	//
+	// StorageDir 是运行期对象存储的根目录（PDF、日后的预生成音频）。默认值按
+	// 文档约定的启动方式（cd server && go run ./cmd/api）指向仓库根的 var/storage/。
+	// 换工作目录启动时必须显式给绝对路径，否则对象会落到别处。
+	StorageDir string `env:"STORAGE_DIR" envDefault:"../var/storage"`
+	// ChromePath 是 chromedp 用的 Chromium 内核路径。留空表示自动探测
+	// （先看 Playwright 缓存，再看系统安装路径）。它只在打印 PDF 时才需要，
+	// 所以 API 进程不因为缺它而拒绝启动，由 worker 在渲染前报错。
+	ChromePath string `env:"CHROME_PATH"`
+	// PDFRenderTimeout 单份 PDF 的渲染上限。Chromium 冷启动约 5s，正常渲染 1~3s，
+	// 给足余量但不放任卡死。
+	PDFRenderTimeout time.Duration `env:"PDF_RENDER_TIMEOUT" envDefault:"60s"`
+	// PrintRetention 打印件与 PDF 的保留时长，超过由 worker 清理。
+	PrintRetention time.Duration `env:"PRINT_RETENTION" envDefault:"720h"` // 30 天
 }
 
 // Load 读取环境变量并校验。本地存在 .env 时优先加载（文件不存在则忽略）。
@@ -164,6 +180,17 @@ func (c Config) Validate() error {
 	}
 	if c.ExchangeCodeTTL <= 0 || c.ExchangeCodeTTL > c.QRCodeTTL {
 		errs = append(errs, "EXCHANGE_CODE_TTL 必须为正值且不超过 QR_CODE_TTL")
+	}
+
+	// 打印与存储
+	if strings.TrimSpace(c.StorageDir) == "" {
+		errs = append(errs, "STORAGE_DIR 不能为空")
+	}
+	if c.PDFRenderTimeout <= 0 {
+		errs = append(errs, "PDF_RENDER_TIMEOUT 必须为正值")
+	}
+	if c.PrintRetention <= 0 {
+		errs = append(errs, "PRINT_RETENTION 必须为正值")
 	}
 
 	if len(errs) > 0 {

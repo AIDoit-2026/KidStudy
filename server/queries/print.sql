@@ -111,3 +111,92 @@ VALUES (
     0, 'parent', sqlc.arg(parent_note), 'finished', sqlc.arg(print_job_id)
 )
 RETURNING id;
+
+-- ---------------------------------------------------------------- 取数（渲染题面用）
+
+-- 归属校验：parent_id 一起过滤，越权当作不存在（与 children 模块的 404 约定一致）。
+-- name: PrintChildBasic :one
+SELECT id, nickname, stage_code
+FROM children
+WHERE id = sqlc.arg(id) AND parent_id = sqlc.arg(parent_id) AND active;
+
+-- 范围一：按阶段取（家长手动挑「S2 的字」这类）
+-- name: PrintKPsByStage :many
+SELECT id, subject_code, kind, name, difficulty
+FROM knowledge_points
+WHERE subject_code = sqlc.arg(subject_code)
+  AND (sqlc.arg(stage_code)::text = '' OR stage_code = sqlc.arg(stage_code)::text)
+  AND status = 'published'
+ORDER BY difficulty, code
+LIMIT sqlc.arg(lim);
+
+-- 范围二：近期新学（默认「本周」= 近 7 天）—— 时间点由 Go 侧算好传进来，
+-- 不在 SQL 里做 now() - interval 的推算，免得 sqlc 对 interval 参数推断出意外类型。
+-- name: PrintKPsRecent :many
+SELECT DISTINCT kp_id
+FROM mastery_records
+WHERE child_id = sqlc.arg(child_id)
+  AND COALESCE(mastered_at, first_learned_at) IS NOT NULL
+  AND COALESCE(mastered_at, first_learned_at) >= sqlc.arg(since)
+ORDER BY kp_id
+LIMIT sqlc.arg(lim);
+
+-- 范围三：错题本（未移出的）
+-- name: PrintKPsWrongBook :many
+SELECT kp_id
+FROM wrong_book_entries
+WHERE child_id = sqlc.arg(child_id) AND cleared_at IS NULL
+ORDER BY added_at DESC, kp_id
+LIMIT sqlc.arg(lim);
+
+-- 范围四：已掌握（做闪卡复习用）
+-- name: PrintKPsMastered :many
+SELECT kp_id
+FROM mastery_records
+WHERE child_id = sqlc.arg(child_id) AND level >= sqlc.arg(min_level)
+ORDER BY COALESCE(mastered_at, first_learned_at) DESC NULLS LAST, kp_id
+LIMIT sqlc.arg(lim);
+
+-- 故事小册子：指定故事，或按级别挑一篇最短的（篇幅短的更适合一次朗读完）。
+-- 只取已发布且通过适宜性筛查的，与孩子端的可见口径保持一致。
+-- name: PrintGetStory :one
+SELECT id, title, lang, level_code, body_md, questions, discussion, char_count
+FROM stories
+WHERE id = sqlc.arg(id) AND status = 'published' AND suitable;
+
+-- name: PrintPickStory :one
+SELECT id, title, lang, level_code, body_md, questions, discussion, char_count
+FROM stories
+WHERE status = 'published' AND suitable
+  AND (sqlc.arg(stage_code)::text = '' OR level_code = sqlc.arg(stage_code)::text)
+ORDER BY char_count, id
+LIMIT 1;
+
+-- 数学题的补录挂点：一道口算题卡属于哪个知识点。数学题的 kp 是「题型档」不是单题，
+-- 所以整张卷子补录只推进这一个技能点（§4.6 步骤 6）。用 metadata 里的 template_code
+-- 关联，与 M3 播种时的写入口径一致。
+-- name: PrintMathKPByTemplate :one
+SELECT id
+FROM knowledge_points
+WHERE kind = 'math_skill' AND metadata->>'template_code' = sqlc.arg(template_code)::text
+LIMIT 1;
+
+-- ---------------------------------------------------------------- 保留期清理
+
+-- 超过保留期、PDF 还在的任务。payload 是不可变快照，清掉 PDF 后随时能重新渲染，
+-- 所以清理只删文件、不动打印记录本身（家长还能看到「当时印过什么」）。
+-- name: ListExpiredPrintJobs :many
+SELECT id, pdf_path
+FROM print_jobs
+WHERE pdf_path IS NOT NULL AND created_at < sqlc.arg(before)
+ORDER BY created_at
+LIMIT sqlc.arg(lim);
+
+-- name: ClearPrintJobPDF :exec
+UPDATE print_jobs SET
+    pdf_path      = NULL,
+    page_count    = 0,
+    status        = 'created',
+    error_message = '',
+    updated_at    = now()
+WHERE id = sqlc.arg(id);

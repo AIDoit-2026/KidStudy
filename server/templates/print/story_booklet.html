@@ -1,0 +1,25 @@
+{{define "pagecss"}}<style>@page { size: A5; margin: 12mm; }</style>{{end}}
+
+{{define "content"}}
+{{if .Items}}
+<article class="story-body" style="font-size:{{.Options.FontSize}}pt;">
+    {{range .Items}}<p>{{.Main}}</p>{{end}}
+</article>
+{{else}}
+<div class="empty-hint">没有取到故事正文</div>
+{{end}}
+
+{{if .Options.WithAnswer}}
+{{if .Sheets}}
+{{range .Sheets}}
+<section class="section">
+    <div class="section-title">{{.Title}}</div>
+    {{if .Note}}<div class="note">{{.Note}}</div>{{end}}
+    {{range $i, $row := .Rows}}
+    <div class="story-question"><span class="q-idx">{{inc $i}}.</span>{{index $row 0}}</div>
+    {{end}}
+</section>
+{{end}}
+{{end}}
+{{end}}
+{{end}}

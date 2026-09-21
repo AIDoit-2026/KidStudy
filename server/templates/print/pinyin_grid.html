@@ -1,0 +1,17 @@
+{{define "pagecss"}}<style>@page { size: {{.Meta.Paper}}; margin: 15mm; }</style>{{end}}
+
+{{define "content"}}
+{{if .Items}}
+<div class="note">上格是范写，下格自己写。四线三格里，中间两条虚线之间是主体高度。</div>
+{{range .Items}}
+<div class="section" style="margin-bottom:3mm;">
+    <div class="fgrid" style="height:16mm;">
+        <span class="fgrid-text" style="font-size:{{$.Options.FontSize}}pt;">{{.Main}}</span>
+    </div>
+    <div class="fgrid" style="height:16mm;margin-top:1.5mm;"></div>
+</div>
+{{end}}
+{{else}}
+<div class="empty-hint">没有取到音节，请检查阶段编号（如 E1）</div>
+{{end}}
+{{end}}

@@ -21,6 +21,7 @@ import (
 	"kidstudy/internal/feature/mastery"
 	"kidstudy/internal/feature/parent"
 	"kidstudy/internal/feature/practice"
+	"kidstudy/internal/feature/print"
 	"kidstudy/internal/feature/report"
 	"kidstudy/internal/feature/review"
 	"kidstudy/internal/feature/system"
@@ -29,6 +30,7 @@ import (
 	"kidstudy/internal/platform/middleware"
 	"kidstudy/internal/platform/postgres"
 	httpsrv "kidstudy/internal/platform/server"
+	"kidstudy/internal/platform/storage"
 	migrations "kidstudy/migrations"
 )
 
@@ -77,6 +79,23 @@ func registerFeatures(r chi.Router, cfg config.Config, log *slog.Logger, db *pos
 		log,
 	)
 
+	// storage 是配置项，目录不可用说明部署配错了——这种错重启也改不掉，
+	// 与其让 print 端点零星报 500，不如不注册，让 /ready 与日志把问题说清楚。
+	store, err := storage.NewLocal(cfg.StorageDir)
+	if err != nil {
+		log.Error("初始化对象存储失败，打印模块不会挂载", "error", err, "storage_dir", cfg.StorageDir)
+		return
+	}
+	// API 进程不渲染 PDF（渲染在 worker），这里的 renderer 只是打印服务的占位：
+	// 它是懒启动的，构造不会拉起 Chromium，也不会因为这台机器没装浏览器而拖垮 API；
+	// 既然从未初始化，进程退出时也无需 Close。
+	renderer := print.NewPDFRenderer(cfg.ChromePath, cfg.PDFRenderTimeout)
+
+	printH := print.NewHandler(
+		print.NewService(print.NewRepository(db.Pool()), contentSvc, masterySvc, reportSvc, store, renderer, log),
+		log,
+	)
+
 	// 业务 API 统一走 /api/v1；健康检查留在根路径，供编排直接探活
 	r.Route("/api/v1", func(r chi.Router) {
 		authH.Register(r, requireAuth)
@@ -90,6 +109,7 @@ func registerFeatures(r chi.Router, cfg config.Config, log *slog.Logger, db *pos
 			practiceH.Register(r)
 			reportH.Register(r)
 			parentH.Register(r)
+			printH.Register(r)
 		})
 	})
 }

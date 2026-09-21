@@ -1,0 +1,45 @@
+{{define "pagecss"}}<style>@page { size: {{.Meta.Paper}}; margin: 15mm; }</style>{{end}}
+
+{{define "content"}}
+{{if .Items}}
+<div class="note">把左边的汉字和右边对应的内容用线连起来。连完再读一遍。</div>
+<div class="match-wrap">
+    <div class="match-col left">
+        {{range .Items}}
+        <div class="match-item">
+            <span class="match-dot"></span>
+            <span class="txt" style="font-size:{{$.Options.FontSize}}pt">{{.Main}}</span>
+        </div>
+        {{end}}
+    </div>
+    <div></div>
+    <div class="match-col right">
+        {{range .Items}}
+        <div class="match-item">
+            <span class="match-dot"></span>
+            <span class="txt" style="font-size:{{$.Options.FontSize}}pt">{{.Sub}}</span>
+        </div>
+        {{end}}
+    </div>
+</div>
+
+{{if $.Options.BlankLines}}
+<div class="note" style="margin-top:4mm;">右列已打乱顺序。连线时别按行对，要按内容对。</div>
+{{end}}
+{{else}}
+<div class="empty-hint">没有取到足够的配对内容（至少需要 4 组）</div>
+{{end}}
+
+{{if .Options.WithAnswer}}
+{{if .AnswerItems}}
+<section class="answer-section">
+    <div class="section-title">正确配对</div>
+    <div class="drill cols-2">
+        {{range .AnswerItems}}
+        <div class="q"><span class="q-no">{{.Seq}}.</span><span style="font-size:{{$.Options.FontSize}}pt">{{.Main}} — {{.Answer}}</span></div>
+        {{end}}
+    </div>
+</section>
+{{end}}
+{{end}}
+{{end}}

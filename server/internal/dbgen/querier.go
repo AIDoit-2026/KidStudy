@@ -17,6 +17,7 @@ type Querier interface {
 	BadgeSessionStats(ctx context.Context, childID uuid.UUID) (BadgeSessionStatsRow, error)
 	// worker 拉取待渲染任务（多实例安全）。
 	ClaimPrintJobs(ctx context.Context, lim int32) ([]ClaimPrintJobsRow, error)
+	ClearPrintJobPDF(ctx context.Context, id uuid.UUID) error
 	// 家长确认/补录：主观项评分写这里，客观计数一个都不动（§4.11 家长评分不污染客观正确率）
 	ConfirmSession(ctx context.Context, arg ConfirmSessionParams) (ConfirmSessionRow, error)
 	CountDueReviews(ctx context.Context, arg CountDueReviewsParams) (int64, error)
@@ -83,6 +84,10 @@ type Querier interface {
 	// 到期复习：逾期越久越靠前，同逾期程度下掌握度低的优先（§4.2 步骤 2）
 	ListDueReviews(ctx context.Context, arg ListDueReviewsParams) ([]ListDueReviewsRow, error)
 	ListEnWords(ctx context.Context, arg ListEnWordsParams) ([]ListEnWordsRow, error)
+	// ---------------------------------------------------------------- 保留期清理
+	// 超过保留期、PDF 还在的任务。payload 是不可变快照，清掉 PDF 后随时能重新渲染，
+	// 所以清理只删文件、不动打印记录本身（家长还能看到「当时印过什么」）。
+	ListExpiredPrintJobs(ctx context.Context, arg ListExpiredPrintJobsParams) ([]ListExpiredPrintJobsRow, error)
 	ListHanzi(ctx context.Context, arg ListHanziParams) ([]ListHanziRow, error)
 	ListHanziWords(ctx context.Context, hanziIds []uuid.UUID) ([]ListHanziWordsRow, error)
 	// ---------------------------------------------------------------- 组卷素材
@@ -127,6 +132,26 @@ type Querier interface {
 	// 家长设置的完整视图（含 compare_children）；parent 模块专用，
 	// 不动 learning.sql 里 practice 已经在用的 GetParentSettings，避免连带影响。
 	ParentSettingsFull(ctx context.Context, parentID uuid.UUID) (ParentSettingsFullRow, error)
+	// ---------------------------------------------------------------- 取数（渲染题面用）
+	// 归属校验：parent_id 一起过滤，越权当作不存在（与 children 模块的 404 约定一致）。
+	PrintChildBasic(ctx context.Context, arg PrintChildBasicParams) (PrintChildBasicRow, error)
+	// 故事小册子：指定故事，或按级别挑一篇最短的（篇幅短的更适合一次朗读完）。
+	// 只取已发布且通过适宜性筛查的，与孩子端的可见口径保持一致。
+	PrintGetStory(ctx context.Context, id uuid.UUID) (PrintGetStoryRow, error)
+	// 范围一：按阶段取（家长手动挑「S2 的字」这类）
+	PrintKPsByStage(ctx context.Context, arg PrintKPsByStageParams) ([]PrintKPsByStageRow, error)
+	// 范围四：已掌握（做闪卡复习用）
+	PrintKPsMastered(ctx context.Context, arg PrintKPsMasteredParams) ([]uuid.UUID, error)
+	// 范围二：近期新学（默认「本周」= 近 7 天）—— 时间点由 Go 侧算好传进来，
+	// 不在 SQL 里做 now() - interval 的推算，免得 sqlc 对 interval 参数推断出意外类型。
+	PrintKPsRecent(ctx context.Context, arg PrintKPsRecentParams) ([]uuid.UUID, error)
+	// 范围三：错题本（未移出的）
+	PrintKPsWrongBook(ctx context.Context, arg PrintKPsWrongBookParams) ([]uuid.UUID, error)
+	// 数学题的补录挂点：一道口算题卡属于哪个知识点。数学题的 kp 是「题型档」不是单题，
+	// 所以整张卷子补录只推进这一个技能点（§4.6 步骤 6）。用 metadata 里的 template_code
+	// 关联，与 M3 播种时的写入口径一致。
+	PrintMathKPByTemplate(ctx context.Context, templateCode string) (uuid.UUID, error)
+	PrintPickStory(ctx context.Context, stageCode string) (PrintPickStoryRow, error)
 	PublishStory(ctx context.Context, id uuid.UUID) (int64, error)
 	// 难度自适应用：取最近 n 次作答的正确与否与用时（§4.2「连 3 次正确率<60% 降档」）
 	RecentAnswers(ctx context.Context, arg RecentAnswersParams) ([]RecentAnswersRow, error)

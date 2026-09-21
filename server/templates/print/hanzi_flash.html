@@ -1,0 +1,31 @@
+{{define "pagecss"}}<style>@page { size: {{.Meta.Paper}}; margin: 12mm; }</style>{{end}}
+
+{{define "content"}}
+{{if .Items}}
+<div class="note">正面：只看大字认读。沿卡片中线对折，背面是拼音与组词，用来核对。</div>
+<div class="card-grid cols-2">
+    {{range .Items}}
+    <div class="card" style="height:42mm;display:flex;align-items:center;justify-content:center;">
+        <span style="font-size:{{$.Options.FontSize}}pt;line-height:1;">{{.Main}}</span>
+    </div>
+    {{end}}
+</div>
+{{else}}
+<div class="empty-hint">没有取到卡片内容</div>
+{{end}}
+
+{{if .AnswerItems}}
+<section class="answer-section">
+    <div class="section-title">背面</div>
+    <div class="card-grid cols-2">
+        {{range .AnswerItems}}
+        <div class="card" style="height:42mm">
+            {{if .Sub}}<div class="card-sub" style="font-size:0.85em">{{.Sub}}</div>{{end}}
+            <div style="font-size:{{$.Options.FontSize}}pt;line-height:1.1;">{{.Main}}</div>
+            {{if .Extra}}<div class="card-foot">{{range $i, $w := .Extra}}{{if $i}} / {{end}}{{$w}}{{end}}</div>{{end}}
+        </div>
+        {{end}}
+    </div>
+</section>
+{{end}}
+{{end}}

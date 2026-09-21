@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>{{.Title}}</title>
+<style>{{css}}</style>
+{{block "pagecss" .}}{{end}}
+</head>
+<body class="paper-{{.Meta.Paper}}">
+
+<header class="sheet-head">
+    <div class="head-title">{{.Title}}</div>
+    <div class="head-meta">
+        {{if .Meta.ChildName}}<span>{{.Meta.ChildName}}</span>{{end}}
+        {{if .Meta.ChildStage}}<span>{{.Meta.ChildStage}}</span>{{end}}
+        {{if .Meta.DateLabel}}<span>{{.Meta.DateLabel}}</span>{{end}}
+        {{if .Meta.Source}}<span>{{.Meta.Source}}</span>{{end}}
+    </div>
+</header>
+
+{{if .Subtitle}}<p class="note">{{.Subtitle}}</p>{{end}}
+
+{{if .Warnings}}
+<div class="section">
+    <div class="note">提示：{{range $i, $w := .Warnings}}{{if $i}}；{{end}}{{$w}}{{end}}</div>
+</div>
+{{end}}
+
+<main class="sheet-body">
+{{template "content" .}}
+</main>
+
+<footer class="sheet-foot">
+    <span>{{.Footer}}</span>
+    {{if .Meta.Watermark}}<span>{{.Meta.Watermark}}</span>{{end}}
+</footer>
+
+<div class="screen-only toolbar">
+    <button type="button" onclick="window.print()">打印 / 存为 PDF</button>
+    <button type="button" class="ghost" onclick="window.close()">关闭</button>
+</div>
+
+</body>
+</html>

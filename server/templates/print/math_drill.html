@@ -1,0 +1,29 @@
+{{define "pagecss"}}<style>@page { size: {{.Meta.Paper}}; margin: 15mm; }</style>{{end}}
+
+{{define "content"}}
+{{if .Items}}
+<div class="drill cols-{{.Options.Columns}}">
+    {{range .Items}}
+    <div class="q">
+        <span class="q-no">{{.Seq}}.</span><span class="q-prompt" style="font-size:{{$.Options.FontSize}}pt">{{blank .Main}}</span>
+        {{if $.Options.BlankLines}}<div class="q-blank"></div>{{end}}
+    </div>
+    {{end}}
+</div>
+{{else}}
+<div class="empty-hint">没有生成题目，请检查题型模板编号（如 M2_ADD10）</div>
+{{end}}
+
+{{if .Options.WithAnswer}}
+{{if .AnswerItems}}
+<section class="answer-section">
+    <div class="section-title">参考答案</div>
+    <div class="drill cols-6">
+        {{range .AnswerItems}}
+        <div class="q"><span class="q-no">{{.Seq}}.</span><span style="font-size:{{$.Options.FontSize}}pt">{{.Answer}}</span></div>
+        {{end}}
+    </div>
+</section>
+{{end}}
+{{end}}
+{{end}}
