@@ -34,15 +34,16 @@ func NewImporter(repo *Repository, log *slog.Logger, dataRoot string) *Importer 
 
 // Report 导入结果计数，用于人工核对「字数对得上」。
 type Report struct {
-	Stages       int
-	Hanzi        int
-	HanziWords   int
-	EnWords      int
-	Stories      int
-	StoryPairs   int
-	ReviewItems  int
-	PlanChildren int
-	PlanRows     int
+	Stages        int
+	Hanzi         int
+	HanziWords    int
+	EnWords       int
+	Stories       int
+	StoryPairs    int
+	ReviewItems   int
+	PlanChildren  int
+	PlanRows      int
+	RefBackfilled bool
 }
 
 // importStep 是导入流程中的一步。
@@ -58,6 +59,7 @@ func (im *Importer) steps() []importStep {
 		{"hanzi", "汉字与组词", im.importHanzi},
 		{"words", "英语单词", im.importEnWords},
 		{"stories", "故事与双语配对", im.importStories},
+		{"refs", "知识点反向引用回填", im.backfillRefIDs},
 		{"plans", "标准节奏基准线", im.importPlans},
 	}
 }
@@ -168,6 +170,37 @@ func gradeLabel(n int) string {
 		return names[grade-1] + "年级" + term
 	}
 	return fmt.Sprintf("%d 年级%s", grade, term)
+}
+
+// backfillRefIDs 回填 knowledge_points.ref_id。
+//
+// 导入顺序是先写内容行、再 upsert 知识点，所以「知识点 → 内容行」这一侧的引用
+// 只能在两边都落地之后补。组卷要靠它 join 出读音/组词/释义，缺了会一条题都出不来。
+//
+// 幂等：只在 ref_id 与期望值不同时才更新，重跑导入不产生额外写入。
+func (im *Importer) backfillRefIDs(ctx context.Context, rep *Report) error {
+	statements := []struct {
+		name string
+		sql  string
+	}{
+		{"汉字", `UPDATE knowledge_points kp SET ref_id = h.id
+                  FROM hanzi h
+                  WHERE kp.kind = 'hanzi' AND kp.code = 'hanzi:' || h."char"
+                    AND kp.ref_id IS DISTINCT FROM h.id`},
+		{"英语词", `UPDATE knowledge_points kp SET ref_id = w.id
+                    FROM en_words w
+                    WHERE kp.kind = 'word' AND kp.code = 'word:' || w.word
+                      AND kp.ref_id IS DISTINCT FROM w.id`},
+	}
+	for _, st := range statements {
+		tag, err := im.repo.Pool().Exec(ctx, st.sql)
+		if err != nil {
+			return fmt.Errorf("回填%s知识点引用失败: %w", st.name, err)
+		}
+		im.log.Info("回填知识点引用", "kind", st.name, "rows", tag.RowsAffected())
+	}
+	rep.RefBackfilled = true
+	return nil
 }
 
 func (im *Importer) importStages(ctx context.Context, rep *Report) error {
