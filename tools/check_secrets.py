@@ -51,7 +51,10 @@ PLACEHOLDER = re.compile(
 )
 
 PATTERNS = [
-    ("jwt", re.compile(r"eyJ[A-Za-z0-9._-]{16,}")),
+    # 必须三段点分才算 JWT：只写 `eyJ[A-Za-z0-9._-]{16,}` 会命中一切 base64
+    # （`eyJ` 正是 `{"` 的 base64），而 compress 后的 bundle 里遍地是
+    # sourceMappingURL=data:...;base64,eyJ2ZXJzaW9uIjoz...（server/tmp 的调试转储实际踩过）。
+    ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")),
     ("bearer", re.compile(r"(?i)bearer\s+[A-Za-z0-9._-]{16,}")),
     # 前面 (?<![-\w]) 是必需的：否则 `'current-password' : 'new-password'` 这种
     # 三元表达式会把 `password' : 'new-password` 认成「键=password 值=new-password」，
@@ -81,6 +84,23 @@ TEXT_EXT = {
     ".go", ".ts", ".tsx", ".js", ".jsx", ".css", ".html", ".sql", ".sh",
     ".example", ".env", ".log", ".batch", ".conf",
 }
+
+
+def expand_paths(extra):
+    """把 --path 给的路径展开成仓库相对文件列表；给目录就递归收集。"""
+    out = []
+    for item in extra:
+        abs_path = os.path.abspath(item)
+        if os.path.isdir(abs_path):
+            for dirpath, dirnames, filenames in os.walk(abs_path):
+                dirnames[:] = [d for d in dirnames
+                               if d not in {".git", "__pycache__", "node_modules"}]
+                for name in filenames:
+                    full = os.path.join(dirpath, name)
+                    out.append(os.path.relpath(full, REPO_ROOT).replace("\\", "/"))
+        else:
+            out.append(os.path.relpath(abs_path, REPO_ROOT).replace("\\", "/"))
+    return out
 
 
 def git_lines(git_args):
@@ -206,7 +226,7 @@ def main():
                         help="只扫暂存区（pre-commit 钩子用）")
     parser.add_argument("--all", action="store_true", help="扫全部已跟踪文件")
     parser.add_argument("--path", action="append", default=[],
-                        help="额外指定文件（相对仓库根或绝对路径），可重复")
+                        help="额外指定文件或目录（目录会递归），可重复")
     args = parser.parse_args()
 
     if args.staged:
@@ -217,8 +237,7 @@ def main():
     else:
         mode, files = "path", []
 
-    for extra in args.path:
-        rel = os.path.relpath(os.path.abspath(extra), REPO_ROOT).replace("\\", "/")
+    for rel in expand_paths(args.path):
         if rel not in files:
             files.append(rel)
 
