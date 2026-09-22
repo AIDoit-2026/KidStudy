@@ -23,7 +23,7 @@ export function LockScreen({ stats = [] }: { stats?: LockStat[] }) {
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-paper px-6 text-center">
+      <div data-testid="lock-screen" className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-paper px-6 text-center">
         <p className="text-2xl font-bold md:text-3xl">{title}</p>
         <p className="max-w-md text-ink-soft">
           眼睛和大脑都需要休息。今天就到这里，明天再来吧。

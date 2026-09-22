@@ -29,7 +29,7 @@ export function RestOverlay() {
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-paper px-6 text-center">
+      <div data-testid="rest-overlay" className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-paper px-6 text-center">
         <p className="text-2xl font-bold md:text-4xl">让眼睛歇一会儿</p>
         <p className="max-w-md text-ink-soft">
           抬头看看 6 米以外的地方，或者窗外最远的那个点。眼睛也要做操。
