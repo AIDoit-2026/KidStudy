@@ -107,7 +107,33 @@ python tests/ui/run.py flow1 --dry-run
 node <agent-browser.js> batch < rendered.json
 ```
 
-截图默认落在 `server/tmp/ui/`（gitignored）。要看历史验收截图就直接翻那个目录。
+## 截图策略：本地证据，不入库
+
+`flow*.json` 里的 `["screenshot", "${OUT_DIR}/xx.png"]` 只是**跑的时候顺手留个证据**，
+默认落在 `server/tmp/ui/`，**明确不入库**（`/server/tmp/` 已在 `.gitignore`）。
+
+不版本化截图，是因为 **UI 还要改版**：像素基线一改版就全红，维护成本落在「每次改版重刷
+基线」上，却换不来额外信息 —— 真正判成败的是文本断言，不是图片比对。
+
+因此有一条硬约束：**验收结论不许依赖截图。** 所有断言都走
+`eval` 文本 / `data-testid` / `matchMedia`，`screenshot` 指令只出现在断言旁边当留档。
+
+这条约束可以直接验：`--no-shot` 会在起浏览器前把截图指令全摘掉。
+
+```bash
+python tests/ui/run.py flow2 --no-shot     # 一条 screenshot 都不执行
+```
+
+实测 flow2：`--no-shot` 与带截图两次跑，`matchMedia` 断点断言（`w:390/820/1440/1920`
+→ `sm/md/lg/xl`）逐字一致，均 exit=0、失败项 0 条，且 `server/tmp/ui/` 一张 png 都没新增。
+
+⚠️ 由此推出：**选元素一律用 `data-testid`，不要用 Tailwind 类名或 DOM 层级**。
+护眼两块遮罩的锚点就是为此加的（`rest-overlay` / `lock-screen`，倒计时另有 `rest-countdown`）。
+改版时最容易被连带打掉的只有**文案断言**（如 flow4 的「让眼睛歇一会儿」、flow6 的
+「这一节的时间到啦」）—— 改文案时同步这两条流程即可，锚点不动。
+
+> 想让某次验收的截图被长期保留，自己复制出 `server/tmp/` 再另行归档；
+> 往仓库里加图片请先确认确实必要。
 
 ## 长等待怎么处理（最容易踩的坑）
 

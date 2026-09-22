@@ -11,7 +11,8 @@
 - 配置全来自环境变量、启动时集中校验，缺失即 fail-fast；只提交 `.env.example`。
 - 错误用 `apperr` 类型化 + 全局映射，绝不返回堆栈；响应恒为 `{data, meta.request_id}`。
 - 内容资产放 `var/`（gitignored）；端到端脚本入库：冒烟 `server/tests/smoke/`、UI 验收
-  `server/tests/ui/`，共用 `server/tests/_common.py`（按脚本位置推导路径，任意 CWD 可跑）。
+  `server/tests/ui/`，共用 `server/tests/_common.py`（按脚本位置推导，任意 CWD 可跑）；
+  **UI 截图不入库**（落 `server/tmp/ui/` 仅留档；断言只走 `data-testid`/文本）。
 
 ## 已拍板的产品决策
 - 关闭公开注册（`BOOTSTRAP_INVITE_CODE`）；故事只做亲子朗读，不做控字改写。
@@ -30,10 +31,9 @@
   `localhost`（CORS 白名单同）。
 - 前端工具链走托管 node 全路径 `...\22.22.2-3\`：npm 用
   `node <该目录>/node_modules/npm/bin/npm-cli.js`（`.cmd` shim 在 Git Bash 踩坑），registry 用
-  npmmirror，独立缓存 `--cache web/.npm-cache`；浏览器自动化脚本在 `server/tests/ui/`（用法与
-  踩坑见其 README），凭据经 stdin 传入、不落命令行。
-- 从零入库的前端无法每笔都过 `vite build`：中间各笔只保证 `tsc --noEmit`，最后一笔跑全量
-  build；add 顺序按依赖拓扑排，不能 `git add .` 一把梭。
+  npmmirror，独立缓存 `--cache web/.npm-cache`；浏览器自动化见 `server/tests/ui/` README，
+  凭据走 stdin 不落命令行。
+- 前端入库提交：中间各笔只过 `tsc --noEmit`，末笔跑全量 build；add 按依赖拓扑排。
 
 ## 技术栈
 - 后端 Go + chi + pgx；连接层 sqlc，**不用 ORM**（本项目是批量导入 + 复杂查询，恰是 ORM 短板）。
