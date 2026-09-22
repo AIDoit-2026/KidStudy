@@ -15,6 +15,7 @@ agent-browser 会整批拒收。
     cd server && python tests/ui/run.py flow2
     python server/tests/ui/run.py flow2 --base-url http://localhost:5173 --out-dir server/tmp/ui
     python tests/ui/run.py flow2 --dry-run          只渲染并报告替换结果，不启动浏览器
+    python tests/ui/run.py flow2 --no-shot          跳过 screenshot 指令（截图不入库，只作留档）
 
 长等待怎么办（重要）
 --------------------
@@ -289,6 +290,8 @@ def main():
                     help="agent-browser 会话名，默认按流程名派生（同一会话跨调用保状态）")
     ap.add_argument("--keep-open", action="store_true",
                     help="跑完不关浏览器（默认会 close --all 回收进程）")
+    ap.add_argument("--no-shot", action="store_true",
+                    help="执行前滤掉全部 screenshot 指令（截图只作本地留档，不参与判定）")
     ap.add_argument("--dry-run", action="store_true",
                     help="只渲染并报告替换结果与执行计划，不启动浏览器")
     args = ap.parse_args()
@@ -321,6 +324,14 @@ def main():
             f"!! 渲染后的 JSON 非法: {exc}\n"
             "   多半是某个替换值里有未转义的字符（Windows 路径的反斜杠最常见）。"
         )
+
+    # screenshot 只作本地留档，不参与判定；--no-shot 在起浏览器前就把它摘掉。
+    # 顺手证明「验收结论不依赖截图」：加了这个开关，删截图与留截图结论必须一致。
+    if args.no_shot:
+        kept = [c for c in cmds
+                if not (isinstance(c, list) and c and c[0] == "screenshot")]
+        print(f"[shot] --no-shot：滤掉 {len(cmds) - len(kept)} 条 screenshot 指令", flush=True)
+        cmds = kept
 
     steps = plan_steps(cmds)
     waits = [s for s in steps if s[0] == "wait"]
