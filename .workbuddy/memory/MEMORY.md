@@ -4,6 +4,8 @@
 - 每完成 1–2 项功能就提交，不等里程碑结束；一条提交只做一件事。
 - 消息以 emoji 开头：✨feat 🐛fix 📝docs 🗃️db ♻️refactor ✅test 🔧chore 🚀perf。
 - 提交前必须过 `go build ./...`（后端）或 `npm run build`（前端）。
+- 提交前有 pre-commit 扫明文凭据（`tools/check_secrets.py`）；**换克隆要 `git config
+  core.hooksPath .githooks`**，否则静默失效；应急 `SKIP_SECRET_SCAN=1`。
 
 ## 架构与工程约束（详见 docs/开发设计文档.md）
 - 后端按功能组织 + 三层 handler/service/repository/model：handler 不写业务，service 不 import
@@ -11,8 +13,8 @@
 - 配置全来自环境变量、启动时集中校验，缺失即 fail-fast；只提交 `.env.example`。
 - 错误用 `apperr` 类型化 + 全局映射，绝不返回堆栈；响应恒为 `{data, meta.request_id}`。
 - 内容资产放 `var/`（gitignored）；端到端脚本入库：冒烟 `server/tests/smoke/`、UI 验收
-  `server/tests/ui/`，共用 `server/tests/_common.py`（按脚本位置推导，任意 CWD 可跑）；
-  **UI 截图不入库**（落 `server/tmp/ui/` 仅留档；断言只走 `data-testid`/文本）。
+  `server/tests/ui/`，共用 `server/tests/_common.py`（任意 CWD 可跑）；
+  **UI 截图不入库**（`server/tmp/ui/` 仅留档，断言只走 `data-testid`/文本）。
 
 ## 已拍板的产品决策
 - 关闭公开注册（`BOOTSTRAP_INVITE_CODE`）；故事只做亲子朗读，不做控字改写。
@@ -21,19 +23,17 @@
 
 ## 本机开发注意
 - 8080 被 Jenkins 占，API 用 `HTTP_ADDR=:18080`；本机有代理，curl 本机必须 `--noproxy '*'`。
-- PostgreSQL 18.6（5432），库/角色 `kidstudy`；口令只在 `server/.env` 与 pgpass，不进命令行；
-  Go 1.27.1；迁移 `cd server && go run ./cmd/api -migrate`。
-- **端到端冒烟一律写成脚本再跑**（命令行里出现口令/长 Bearer 会被安全策略拦下）；Git Bash
-  跑 `.sh` 会触发 wsl.exe 黑名单。
-- 起服务前确认老进程已死：`netstat -ano | grep 18080` 取 PID 后 kill（否则打的是旧二进制）。
-- 前端 `VITE_API_BASE_URL` 主机必须与访问前端的地址**同站**：Refresh Cookie 是 HttpOnly +
-  `SameSite=Lax`，跨站 fetch 不带它 → 换页掉登录；localhost 与 127.0.0.1 是两个站，本机统一
-  `localhost`（CORS 白名单同）。
+- PostgreSQL 18.6（5432），库/角色 `kidstudy`，口令走 `.env`/pgpass；Go 1.27.1；迁移
+  `cd server && go run ./cmd/api -migrate`。
+- **端到端冒烟一律写成脚本再跑**（命令行出现口令/Bearer 会被安全策略拦下）；Git Bash 跑
+  `.sh` 触发 wsl.exe 黑名单。
+- 起服务前确认老进程已死：`netstat -ano | grep 18080` 取 PID 后 kill（否则打旧二进制）。
+- 前端 `VITE_API_BASE_URL` 主机必须与访问地址**同站**：Refresh Cookie 是 HttpOnly +
+  `SameSite=Lax`，跨站 fetch 不带它 → 掉登录；localhost 与 127.0.0.1 是两个站，本机统一
+  `localhost`（CORS 同）。
 - 前端工具链走托管 node 全路径 `...\22.22.2-3\`：npm 用
   `node <该目录>/node_modules/npm/bin/npm-cli.js`（`.cmd` shim 在 Git Bash 踩坑），registry 用
-  npmmirror，独立缓存 `--cache web/.npm-cache`；浏览器自动化见 `server/tests/ui/` README，
-  凭据走 stdin 不落命令行。
-- 前端入库提交：中间各笔只过 `tsc --noEmit`，末笔跑全量 build；add 按依赖拓扑排。
+  npmmirror，缓存 `--cache web/.npm-cache`；浏览器自动化见 `server/tests/ui/` README。
 
 ## 技术栈
 - 后端 Go + chi + pgx；连接层 sqlc，**不用 ORM**（本项目是批量导入 + 复杂查询，恰是 ORM 短板）。
@@ -56,9 +56,9 @@
   `question_snapshot` 可下发、`answer_key` 永不下发；组卷用 `LoadMaterials` 批量装素材。
 - **`daily_stats.subject_code=''` 是全天合计**，只有它的 `passed` 代表达标；日汇总 worker
   按 (孩子,日期,学科) 覆盖式重算。
-- **算日期差必须用 `daysBetween`**：pgx 的 date 是 UTC 零点，本机 +08 直接相减差 8 小时。
+- **算日期差必须用 `daysBetween`**（pgx 的 date 是 UTC 零点，直接相减差 8 小时）。
 - **打印预览 HTML 与 chromedp 的 PDF 是同一份字符串**；`POST /pdf` 只置 queued 返 202，由
-  `cmd/worker -print` 消费（`FOR UPDATE SKIP LOCKED`）；`page_count` 读 PDF 真实页树。
+  `cmd/worker -print` 消费；`page_count` 读 PDF 真实页树。
 - **前端**：Access Token 只存模块级内存（不进 localStorage/URL）；401 单飞刷新重放一次，
   4xx 不重试、5xx 最多 3 次退避；亮度用两层 fixed 遮罩而非 `filter`；护眼计时只在孩子端外壳；
   打印预览 `/print/:jobId` 不挂外壳。
