@@ -34,7 +34,7 @@ export function RestOverlay() {
         <p className="max-w-md text-ink-soft">
           抬头看看 6 米以外的地方，或者窗外最远的那个点。眼睛也要做操。
         </p>
-        <div className="text-6xl font-bold tabular-nums text-brand md:text-7xl" aria-live="polite">
+        <div data-testid="rest-countdown" className="text-6xl font-bold tabular-nums text-brand md:text-7xl" aria-live="polite">
           {secondsLeft}
         </div>
         <button type="button" className="btn" onClick={() => setPinOpen(true)}>
