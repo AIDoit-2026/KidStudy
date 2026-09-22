@@ -10,7 +10,7 @@
   `net/http`，跨模块只走 service 接口注入。
 - 配置全来自环境变量、启动时集中校验，缺失即 fail-fast；只提交 `.env.example`。
 - 错误用 `apperr` 类型化 + 全局映射，绝不返回堆栈；响应恒为 `{data, meta.request_id}`。
-- 内容资产与脚本产出放 `var/`，冒烟脚本放 `server/tmp/`（均已 gitignored）。
+- 内容资产与脚本产出放 `var/`（gitignored）；冒烟脚本在 `server/tests/smoke/`（已入库）。
 
 ## 已拍板的产品决策
 - 关闭公开注册（`BOOTSTRAP_INVITE_CODE`）；故事只做亲子朗读，不做控字改写。

@@ -117,7 +117,7 @@
 - **跨模块只走 service 接口**：practice → mastery（判分后调状态机）、practice → content（组卷素材
   `LoadMaterials` 批量装载避免 N+1）、practice/mastery → children（`EnsureOwned` 归属校验）。
 
-**验收结果**（`server/tmp/smoke_m3.py`，71 项全通过）
+**验收结果**（`server/tests/smoke/smoke_m3.py`，71 项全通过）
 
 - 同 seed 两次预览题目完全一致、换 seed 不同；
 - 数学会话答对 → 掌握度回带、答错 → 10 分钟后复现且进错题本、重复作答 409；
@@ -147,7 +147,7 @@
 - **跨模块只走接口**：practice 新增 `BadgeAwarder`（只回授予数量）由 report 实现，
   practice 不 import report；对比的孩子归属校验走 `children` 表带 `parent_id` 过滤。
 
-**验收结果**（`server/tmp/smoke_m4.py`，106 项全通过）
+**验收结果**（`server/tests/smoke/smoke_m4.py`，106 项全通过）
 
 - 设置读写：默认值、部分更新不动其它字段、`0 表示不限` 被正确保留、越界 422；
 - 报表：无数据时趋势逐日补零、学科明细带 24 个阶段、非法学科 422；
@@ -178,7 +178,7 @@
 - **`print → report` 多一条只读边**：周报模板复用 `Overview` / `Trend` / `Suggestions`，
   免得报表口径抄两份；方向仍单向（report 不认识 print）。
 
-**验收结果**（`server/tmp/smoke_m5.py`，107 项全通过）
+**验收结果**（`server/tests/smoke/smoke_m5.py`，107 项全通过）
 
 - 模板：10 套齐全、参数契约完整、纯教具（闪卡/拼音格/字母卡/故事/周报）标 `answerable=false`；
 - 建任务：10 套模板逐套建出（连线题按阶段取内容）；口算同 seed 两次题面逐题一致（20 题）；
