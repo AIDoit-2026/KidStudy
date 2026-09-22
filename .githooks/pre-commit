@@ -1,0 +1,37 @@
+#!/bin/sh
+# 提交前扫描暂存区：挡住明文凭据与本机绝对路径入库。
+#
+# 启用（每个克隆各做一次，钩子目录不受版本控制自动生效）：
+#     git config core.hooksPath .githooks
+#
+# 应急绕过（真需要时再用，别养成习惯）：
+#     SKIP_SECRET_SCAN=1 git commit ...
+#
+# 判定逻辑全在 tools/check_secrets.py，本文件只负责找到可用的 python 并转达退出码。
+
+set -u
+
+if [ -n "${SKIP_SECRET_SCAN:-}" ]; then
+    echo "!! 已按 SKIP_SECRET_SCAN 跳过凭据扫描"
+    exit 0
+fi
+
+# 必须验证解释器真能跑：Windows 上 `python` 可能是应用商店的占位程序，
+# 直接调用会以非 0 退出，把正常提交误判成「有问题」。
+PY=""
+for cand in python python3 py; do
+    if command -v "$cand" >/dev/null 2>&1 && "$cand" -c "pass" >/dev/null 2>&1; then
+        PY="$cand"
+        break
+    fi
+done
+
+if [ -z "$PY" ]; then
+    echo "!! 找不到可用的 python，凭据扫描已跳过。" >&2
+    echo "   装上 python 3 后再提交，或手工跑一遍 tools/check_secrets.py --staged 自查。" >&2
+    exit 0
+fi
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+
+exec "$PY" "$root/tools/check_secrets.py" --staged
