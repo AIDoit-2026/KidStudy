@@ -10,7 +10,8 @@
   `net/http`，跨模块只走 service 接口注入。
 - 配置全来自环境变量、启动时集中校验，缺失即 fail-fast；只提交 `.env.example`。
 - 错误用 `apperr` 类型化 + 全局映射，绝不返回堆栈；响应恒为 `{data, meta.request_id}`。
-- 内容资产与脚本产出放 `var/`（gitignored）；冒烟脚本在 `server/tests/smoke/`（已入库）。
+- 内容资产放 `var/`（gitignored）；端到端脚本入库：冒烟 `server/tests/smoke/`、UI 验收
+  `server/tests/ui/`，共用 `server/tests/_common.py`（按脚本位置推导路径，任意 CWD 可跑）。
 
 ## 已拍板的产品决策
 - 关闭公开注册（`BOOTSTRAP_INVITE_CODE`）；故事只做亲子朗读，不做控字改写。
@@ -29,9 +30,8 @@
   `localhost`（CORS 白名单同）。
 - 前端工具链走托管 node 全路径 `...\22.22.2-3\`：npm 用
   `node <该目录>/node_modules/npm/bin/npm-cli.js`（`.cmd` shim 在 Git Bash 踩坑），registry 用
-  npmmirror，独立缓存 `--cache web/.npm-cache`；浏览器自动化用同目录下
-  `node_modules/agent-browser/bin/agent-browser.js`，命令串用 `batch` + stdin JSON 数组，
-  **每个 batch 都要重新登录**（daemon 重建上下文会清 Cookie），且放后台跑。
+  npmmirror，独立缓存 `--cache web/.npm-cache`；浏览器自动化脚本在 `server/tests/ui/`（用法与
+  踩坑见其 README），凭据经 stdin 传入、不落命令行。
 - 从零入库的前端无法每笔都过 `vite build`：中间各笔只保证 `tsc --noEmit`，最后一笔跑全量
   build；add 顺序按依赖拓扑排，不能 `git add .` 一把梭。
 
