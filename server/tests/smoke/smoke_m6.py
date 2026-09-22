@@ -23,12 +23,15 @@
 #      （同站，SameSite=Lax 的 Refresh Cookie 才会随请求发出）。
 import http.cookiejar
 import json
+import os
+import sys
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from _common import env
 
 API = "http://127.0.0.1:18080/api/v1"

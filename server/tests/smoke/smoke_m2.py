@@ -9,12 +9,14 @@
       python server/tests/smoke/smoke_m2.py   —— 任意 CWD 都可以
 """
 import json
+import os
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from _common import env
 
 BASE = "http://127.0.0.1:18080"

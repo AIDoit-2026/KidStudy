@@ -5,9 +5,12 @@
 # 依赖 .env 里的 SMOKE_ACCOUNT / SMOKE_PASSWORD（一个已存在的家长账号，
 # 由 server/tmp/ui_setup.py 造出来）。
 import json
+import os
+import sys
 import urllib.error
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from _common import env
 
 API = "http://127.0.0.1:18080/api/v1"

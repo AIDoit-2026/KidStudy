@@ -25,6 +25,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from _common import SERVER_ROOT, TMP_DIR, env
 
 BASE = "http://127.0.0.1:18080/api/v1"

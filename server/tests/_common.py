@@ -1,12 +1,12 @@
-"""冒烟脚本共用的路径解析与 .env 读取。
+"""测试脚本共用的路径解析与 .env 读取（server/tests/ 下的 smoke 与 ui 共用）。
 
-为什么需要它：这些脚本原先放在 server/tmp/，用 `open(".env")` 或
-`dirname(dirname(__file__))` 去够 server/ 根目录。迁到 server/tests/smoke/ 后目录深度变了，
-那两种写法都会指错地方（甚至够到 server/tests/）。这里统一按「脚本自身位置」推导，
-于是脚本可以从**任意 CWD** 运行：
+为什么要它：这些脚本原先散落在 server/tmp/，用 `open(".env")` 或
+`dirname(dirname(__file__))` 去够 server/ 根目录。正式入库、目录变深之后，
+那两种写法都会指错地方。这里统一按「脚本自身位置」推导，于是**任意 CWD 都能跑**：
 
     cd server && python tests/smoke/smoke_m6.py
     python server/tests/smoke/smoke_m6.py          # 在仓库根也一样
+    python server/tests/ui/run.py flow2
 
 注意：被脚本拉起的 Go 二进制（api / worker / importer）用 godotenv 从**当前工作目录**
 读 .env，所以 subprocess 必须显式传 cwd=SERVER_ROOT，不能沿用调用者的 CWD。
@@ -16,8 +16,8 @@
 """
 import os
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-SERVER_ROOT = os.path.dirname(os.path.dirname(HERE))  # -> server/
+HERE = os.path.dirname(os.path.abspath(__file__))  # -> server/tests
+SERVER_ROOT = os.path.dirname(HERE)  # -> server/
 ENV_PATH = os.path.join(SERVER_ROOT, ".env")
 TMP_DIR = os.path.join(SERVER_ROOT, "tmp")  # 编译产物：api.exe / worker.exe / importer.exe
 

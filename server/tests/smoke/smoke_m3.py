@@ -6,11 +6,14 @@
 # 关键手法：数学题的答案可以直接从题面算出来，因此「答对 / 答错」两条路径
 # 都能确定性地验证，不用靠猜选项碰运气。
 import json
+import os
 import re
+import sys
 import time
 import urllib.parse
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from _common import env
 
 BASE = "http://127.0.0.1:18080/api/v1"
