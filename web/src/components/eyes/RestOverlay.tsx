@@ -29,18 +29,22 @@ export function RestOverlay() {
 
   return (
     <>
-      <div data-testid="rest-overlay" className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-paper px-6 text-center">
-        <p className="text-2xl font-bold md:text-4xl">让眼睛歇一会儿</p>
-        <p className="max-w-md text-ink-soft">
-          抬头看看 6 米以外的地方，或者窗外最远的那个点。眼睛也要做操。
-        </p>
-        <div data-testid="rest-countdown" className="text-6xl font-bold tabular-nums text-brand md:text-7xl" aria-live="polite">
-          {secondsLeft}
+      {/* 外层可滚动、内层 min-h-full 居中：大字号 / 屏幕矮时内容超高也不会被裁切。
+          直接 fixed+justify-center 会让溢出部分顶到视口外且滚不动（大字号回归修复）。 */}
+      <div data-testid="rest-overlay" className="fixed inset-0 z-50 overflow-y-auto bg-paper">
+        <div className="flex min-h-full flex-col items-center justify-center gap-6 px-6 py-8 text-center">
+          <p className="text-2xl font-bold md:text-4xl">让眼睛歇一会儿</p>
+          <p className="max-w-md text-ink-soft">
+            抬头看看 6 米以外的地方，或者窗外最远的那个点。眼睛也要做操。
+          </p>
+          <div data-testid="rest-countdown" className="text-6xl font-bold tabular-nums text-brand md:text-7xl" aria-live="polite">
+            {secondsLeft}
+          </div>
+          <button type="button" className="btn" onClick={() => setPinOpen(true)}>
+            我休息好了（家长解锁）
+          </button>
+          <p className="text-sm text-ink-soft">不想等倒计时？请家长输入 PIN 直接跳过。</p>
         </div>
-        <button type="button" className="btn" onClick={() => setPinOpen(true)}>
-          我休息好了（家长解锁）
-        </button>
-        <p className="text-sm text-ink-soft">不想等倒计时？请家长输入 PIN 直接跳过。</p>
       </div>
       <PinDialog
         open={pinOpen}

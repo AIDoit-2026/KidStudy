@@ -67,42 +67,45 @@ export function PinDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-[60] overflow-y-auto bg-black/50"
       role="dialog"
       aria-modal="true"
       aria-label={title}
     >
-      <div className="card w-full max-w-sm">
-        <h2 className="mb-1 text-lg font-bold">{title}</h2>
-        {description && <p className="mb-3 text-sm text-ink-soft">{description}</p>}
-        <input
-          ref={inputRef}
-          type="password"
-          inputMode="numeric"
-          autoComplete="off"
-          maxLength={6}
-          value={pin}
-          onChange={(event) => setPin(event.target.value.replace(/\D/g, ''))}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') void submit()
-          }}
-          className="mb-2 w-full rounded-xl border border-line bg-surface px-4 py-3 text-center text-2xl tracking-[0.5em] text-ink"
-          placeholder="••••"
-          aria-label="家长 PIN"
-        />
-        {error && <p className="mb-2 text-sm text-danger">{error}</p>}
-        <div className="flex gap-2">
-          <button type="button" className="btn flex-1" onClick={onClose} disabled={busy}>
-            取消
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary flex-1"
-            onClick={() => void submit()}
-            disabled={busy}
-          >
-            {busy ? '校验中…' : '解锁'}
-          </button>
+      {/* 内层负责居中：屏幕矮 + 大字号时弹窗可滚，不至于把「解锁」按钮顶出视口 */}
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div className="card w-full max-w-sm">
+          <h2 className="mb-1 text-lg font-bold">{title}</h2>
+          {description && <p className="mb-3 text-sm text-ink-soft">{description}</p>}
+          <input
+            ref={inputRef}
+            type="password"
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={6}
+            value={pin}
+            onChange={(event) => setPin(event.target.value.replace(/\D/g, ''))}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void submit()
+            }}
+            className="mb-2 w-full rounded-xl border border-line bg-surface px-4 py-3 text-center text-2xl tracking-[0.5em] text-ink"
+            placeholder="••••"
+            aria-label="家长 PIN"
+          />
+          {error && <p className="mb-2 text-sm text-danger">{error}</p>}
+          <div className="flex gap-2">
+            <button type="button" className="btn flex-1" onClick={onClose} disabled={busy}>
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary flex-1"
+              onClick={() => void submit()}
+              disabled={busy}
+            >
+              {busy ? '校验中…' : '解锁'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

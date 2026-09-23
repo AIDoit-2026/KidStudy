@@ -23,26 +23,29 @@ export function LockScreen({ stats = [] }: { stats?: LockStat[] }) {
 
   return (
     <>
-      <div data-testid="lock-screen" className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-paper px-6 text-center">
-        <p className="text-2xl font-bold md:text-3xl">{title}</p>
-        <p className="max-w-md text-ink-soft">
-          眼睛和大脑都需要休息。今天就到这里，明天再来吧。
-        </p>
+      {/* 同 RestOverlay：外层可滚动 + 内层 min-h-full 居中，内容超高也不裁切 */}
+      <div data-testid="lock-screen" className="fixed inset-0 z-50 overflow-y-auto bg-paper">
+        <div className="flex min-h-full flex-col items-center justify-center gap-5 px-6 py-8 text-center">
+          <p className="text-2xl font-bold md:text-3xl">{title}</p>
+          <p className="max-w-md text-ink-soft">
+            眼睛和大脑都需要休息。今天就到这里，明天再来吧。
+          </p>
 
-        {stats.length > 0 && (
-          <div className="grid w-full max-w-md grid-cols-3 gap-3">
-            {stats.map((item) => (
-              <div key={item.label} className="card text-center">
-                <div className="text-2xl font-bold text-brand">{item.value}</div>
-                <div className="text-xs text-ink-soft">{item.label}</div>
-              </div>
-            ))}
-          </div>
-        )}
+          {stats.length > 0 && (
+            <div className="grid w-full max-w-md grid-cols-3 gap-3">
+              {stats.map((item) => (
+                <div key={item.label} className="card text-center">
+                  <div className="text-2xl font-bold text-brand">{item.value}</div>
+                  <div className="text-xs text-ink-soft">{item.label}</div>
+                </div>
+              ))}
+            </div>
+          )}
 
-        <button type="button" className="btn" onClick={() => setPinOpen(true)}>
-          家长解锁继续
-        </button>
+          <button type="button" className="btn" onClick={() => setPinOpen(true)}>
+            家长解锁继续
+          </button>
+        </div>
       </div>
       <PinDialog
         open={pinOpen}
