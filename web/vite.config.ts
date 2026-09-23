@@ -15,5 +15,17 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        // 框架与数据层单独成块：它们很少随业务改动，命中长效缓存；
+        // 业务页面已由 router 的 lazy 各自成 chunk（见 app/router.tsx）。
+        // 注意别加「catch-all vendor」——否则 qrcode.react 这类只被单个懒加载页
+        // 用到的库会被提到公共块，首屏白白多下几十 KB。
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'query-vendor': ['@tanstack/react-query', 'zustand'],
+        },
+      },
+    },
   },
 })
