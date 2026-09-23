@@ -184,6 +184,48 @@ func (s *Service) CreateJob(ctx context.Context, parentID uuid.UUID, req CreateR
 	return jobView(job, spec, payload), nil
 }
 
+// Reprint 一键重印：用原任务的模板与参数克隆一个新任务（§4.6 / M7 收口 #4）。
+//
+// 语义是「同一张纸再来一份」，不是「重新出一套题」：
+//   - 原任务的 params 里已经回写了本次实际用的 seed（见 effectiveSeed），所以
+//     按原参数重建 payload 会得到**逐题一致**的题面——家长丢了纸、撕破了重印，
+//     孩子面对的仍是同一份卷子，纸上已写的答案还能对上。
+//   - 想要「换一套同类型的新题」应该走新建任务并把 seed 留空，那是另一条路径。
+//
+// 归属校验复用 repo.GetJob（不属于该家长即 404）；孩子已归档不阻断重印，
+// 因为 payload 走的是内容快照（按 kp_id 重新装素材），不需要孩子在线。
+func (s *Service) Reprint(ctx context.Context, parentID, id uuid.UUID) (JobView, error) {
+	job, notFound, err := s.repo.GetJob(ctx, parentID, id)
+	if err != nil {
+		return JobView{}, apperr.Internal(err)
+	}
+	if notFound {
+		return JobView{}, apperr.NotFound("打印任务不存在")
+	}
+
+	// 原参数原样带过去：包含已解析的 seed、份数、范围等，逐题可复现。
+	var params Params
+	if len(job.Params) > 0 {
+		if err := json.Unmarshal(job.Params, &params); err != nil {
+			return JobView{}, apperr.Internal(fmt.Errorf("解析原打印参数失败: %w", err))
+		}
+	}
+
+	req := CreateRequest{TemplateCode: job.TemplateCode, Params: params}
+	// child_id 在原始任务里可能为 uuid.Nil（纯教具模板），此时保持无孩子。
+	if job.ChildID != uuid.Nil {
+		childID := job.ChildID
+		req.ChildID = &childID
+	}
+
+	view, err := s.CreateJob(ctx, parentID, req)
+	if err != nil {
+		return JobView{}, err
+	}
+	s.log.Info("打印任务重印", "source_job_id", id, "new_job_id", view.ID, "template", job.TemplateCode)
+	return view, nil
+}
+
 // normalize 用模板定义的默认值补齐缺项，并把数值夹到合法区间。
 //
 // 家长端填的是自由 JSON，边界处不信任：越界的字号会把一页塞爆，

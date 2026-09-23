@@ -48,9 +48,24 @@ func (h *Handler) Register(r chi.Router, limiters *middleware.Limiters) {
 	r.Group(func(r chi.Router) {
 		r.Use(limiters.Print)
 		r.Post("/print/jobs", h.createJob)
+		r.Post("/print/jobs/{id}/reprint", h.reprint)
 		r.Get("/print/jobs/{id}/preview", h.preview)
 		r.Post("/print/jobs/{id}/pdf", h.queuePDF)
 	})
+}
+
+// reprint POST /print/jobs/{id}/reprint —— 一键重印：克隆原任务（模板+参数含 seed）。
+func (h *Handler) reprint(w http.ResponseWriter, r *http.Request) {
+	parentID, id, ok := h.target(w, r)
+	if !ok {
+		return
+	}
+	view, err := h.svc.Reprint(r.Context(), parentID, id)
+	if err != nil {
+		response.Error(w, r, h.log, err)
+		return
+	}
+	response.JSON(w, r, http.StatusCreated, view)
 }
 
 // templates GET /print/templates
