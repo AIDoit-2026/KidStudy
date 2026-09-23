@@ -309,3 +309,115 @@ export type PrintPayload = {
   footer: string
   warnings?: string[]
 }
+
+// ---------------------------------------------------------------- 报表（§4.7 / §4.9）
+
+export type SubjectProgress = {
+  subject_code: string
+  subject_name: string
+  mastered: number
+  planned_total: number
+  due: number
+}
+
+export type OverviewTotals = {
+  duration_sec: number
+  question_count: number
+  correct_count: number
+  accuracy: number
+  star_count: number
+  active_days: number
+  session_count: number
+  avg_accuracy: number
+}
+
+export type ReportOverview = {
+  child_id: string
+  mastered_total: number
+  subjects: SubjectProgress[]
+  totals: OverviewTotals
+  due_total: number
+  streak_days: number
+  badges_earned: number
+  badges_total: number
+  deviation_days: number
+  attempts_per_mastery: number
+  generated_at: string
+}
+
+export type TrendPoint = {
+  date: string
+  duration_sec: number
+  question_count: number
+  correct_count: number
+  accuracy: number
+  new_mastered: number
+  star_count: number
+  planned_new: number
+  actual_new: number
+  repeat_count: number
+  cum_planned: number
+  cum_actual: number
+  deviation_days: number
+  passed: boolean
+  parent_confirmed: boolean
+}
+
+export type ReportTrend = {
+  days: number
+  from: string
+  to: string
+  points: TrendPoint[]
+  note?: string
+}
+
+/** 建议附带的动作类型（与后端 report/actions.go 的常量一一对应）。 */
+export type SuggestionActionType =
+  | 'review_day'
+  | 'tune_quota'
+  | 'assign_practice'
+  | 'lower_difficulty'
+  | 'balance_subjects'
+
+export type SuggestionAction = {
+  type: SuggestionActionType | string
+  label: string
+}
+
+export type ReportSuggestion = {
+  code: string
+  /** info | notice */
+  severity: string
+  subject?: string
+  title: string
+  detail: string
+  data?: Record<string, unknown>
+  actions: SuggestionAction[]
+}
+
+export type ReportSuggestions = {
+  child_id: string
+  suggestions: ReportSuggestion[]
+  generated_at: string
+}
+
+export type SuggestionActionRequest = {
+  type: string
+  kp_id?: string
+  subject?: string
+}
+
+export type SuggestionActionResult = {
+  type: string
+  applied: boolean
+  detail: string
+  data?: Record<string, unknown>
+}
+
+/** PDF 导出结果：复用打印任务，前端轮询 job_id 到 ready 再下载。 */
+export type ReportExportPdfResult = {
+  job_id: string
+  status: string
+  pdf_url: string
+  data_url: string
+}

@@ -6,6 +6,7 @@ import { HomePage } from '../features/child/HomePage'
 import { PracticePage } from '../features/child/PracticePage'
 import { SelectChildPage } from '../features/child/SelectChildPage'
 import { PrintCenterPage } from '../features/parent/PrintCenterPage'
+import { ReportPage } from '../features/parent/ReportPage'
 import { SettingsPage } from '../features/parent/SettingsPage'
 import { PrintPreviewPage } from '../features/print/PrintPreviewPage'
 import { KidLayout, ParentLayout, PublicLayout, RequireAuth, RequireChild } from './layouts'
@@ -37,6 +38,7 @@ export function AppRouter() {
           </Route>
 
           <Route element={<ParentLayout />}>
+            <Route path="/parent/report" element={<ReportPage />} />
             <Route path="/parent/settings" element={<SettingsPage />} />
             <Route path="/parent/print" element={<PrintCenterPage />} />
           </Route>
