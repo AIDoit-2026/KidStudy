@@ -177,7 +177,8 @@ func (h *Handler) verifyPIN(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, r, http.StatusOK, res)
 }
 
-// setRefreshCookie 下发刷新令牌。Secure 随环境切换：本地 http 下不能开，否则浏览器不回传。
+// setRefreshCookie 下发刷新令牌。Secure 由配置决定（默认随环境：生产为 true），
+// 本地 http 下开了会导致浏览器不回传，故不能写死。
 func (h *Handler) setRefreshCookie(w http.ResponseWriter, cipher string, expiresAt time.Time) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     RefreshCookieName,
@@ -186,7 +187,7 @@ func (h *Handler) setRefreshCookie(w http.ResponseWriter, cipher string, expires
 		Expires:  expiresAt,
 		MaxAge:   int(time.Until(expiresAt).Seconds()),
 		HttpOnly: true,
-		Secure:   h.cfg.IsProd(),
+		Secure:   h.cfg.CookieSecureEnabled(),
 		SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -199,7 +200,7 @@ func (h *Handler) clearRefreshCookie(w http.ResponseWriter) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   h.cfg.IsProd(),
+		Secure:   h.cfg.CookieSecureEnabled(),
 		SameSite: http.SameSiteLaxMode,
 	})
 }

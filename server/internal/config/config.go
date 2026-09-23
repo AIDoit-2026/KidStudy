@@ -57,6 +57,11 @@ type Config struct {
 	RateLimitPrintPerMin int  `env:"RATE_LIMIT_PRINT_PER_MIN" envDefault:"30"`
 	RateLimitPrintBurst  int  `env:"RATE_LIMIT_PRINT_BURST" envDefault:"10"`
 
+	// CookieSecure 控制刷新令牌 Cookie 是否带 Secure 属性。
+	// 默认随环境推导（生产为 true），显式设置可覆盖 —— 便于「生产域名走 HTTPS 但本机
+	// 用 http 反代调试」这类场景不被硬编码卡住。nil 表示未显式设置。
+	CookieSecure *bool `env:"COOKIE_SECURE"`
+
 	// 时间与停机
 	ReadTimeout    time.Duration `env:"HTTP_READ_TIMEOUT" envDefault:"15s"`
 	WriteTimeout   time.Duration `env:"HTTP_WRITE_TIMEOUT" envDefault:"30s"`
@@ -110,6 +115,15 @@ func Load() (Config, error) {
 
 // IsProd 是否生产环境。
 func (c Config) IsProd() bool { return c.AppEnv == EnvProd }
+
+// CookieSecureEnabled 刷新令牌 Cookie 是否带 Secure。
+// 显式配置优先，未配置时生产为 true、其余为 false（本地 http 下开了会导致浏览器不回传）。
+func (c Config) CookieSecureEnabled() bool {
+	if c.CookieSecure != nil {
+		return *c.CookieSecure
+	}
+	return c.IsProd()
+}
 
 // LogLevelValue 返回 slog 可识别的日志级别。
 func (c Config) LogLevelValue() slog.Level {
@@ -186,6 +200,23 @@ func (c Config) Validate() error {
 			}
 			if s.burst <= 0 {
 				errs = append(errs, fmt.Sprintf("%s_BURST 必须大于 0", s.name))
+			}
+		}
+	}
+
+	// 生产环境：Cookie 必须带 Secure（否则刷新令牌可能经明文 HTTP 回传）。
+	if c.IsProd() && !c.CookieSecureEnabled() {
+		errs = append(errs, "生产环境 COOKIE_SECURE 不能为 false（刷新令牌 Cookie 必须走 HTTPS）")
+	}
+
+	// 生产环境：对外地址与浏览器可见来源都必须是 https，避免 Cookie/令牌走明文。
+	if c.IsProd() {
+		if !strings.HasPrefix(strings.ToLower(c.BaseURL), "https://") {
+			errs = append(errs, fmt.Sprintf("生产环境 BASE_URL 必须是 https（当前 %q）", c.BaseURL))
+		}
+		for _, o := range c.CORSAllowedOrigins {
+			if o = strings.TrimSpace(o); o != "" && !strings.HasPrefix(strings.ToLower(o), "https://") {
+				errs = append(errs, fmt.Sprintf("生产环境 CORS_ALLOWED_ORIGINS 必须是 https（当前 %q）", o))
 			}
 		}
 	}
