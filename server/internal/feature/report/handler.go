@@ -230,7 +230,10 @@ func (h *Handler) badges(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, r, http.StatusOK, view)
 }
 
-// export GET /reports/{childId}/export?format=csv&days=90&subject=
+// export GET /reports/{childId}/export?format=csv|pdf&days=90&subject=
+//
+// CSV 直接下载（前端存档）；PDF 复用 M5 的周学习报告模板（§4.7 / §10.7）：
+// 建一个打印任务并排队渲染，返回 202 + job_id，前端轮询后再下载。
 func (h *Handler) export(w http.ResponseWriter, r *http.Request) {
 	childID, ok := h.target(w, r)
 	if !ok {
@@ -240,24 +243,43 @@ func (h *Handler) export(w http.ResponseWriter, r *http.Request) {
 	if format == "" {
 		format = "csv"
 	}
-	if format != "csv" {
-		// PDF 走 M5 的打印模块（复用周报告模板），这里只出 CSV
-		response.Error(w, r, h.log, apperr.BadRequest("目前仅支持 format=csv"))
-		return
-	}
 	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
-	data, err := h.svc.ExportCSV(r.Context(), childID, days, r.URL.Query().Get("subject"))
-	if err != nil {
-		response.Error(w, r, h.log, err)
-		return
-	}
 
-	// CSV 是文件下载，不走统一 JSON 信封
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="report.csv"`)
-	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write(data); err != nil {
-		h.log.Warn("写 CSV 响应失败", "child_id", childID, "error", err)
+	switch format {
+	case "csv":
+		data, err := h.svc.ExportCSV(r.Context(), childID, days, r.URL.Query().Get("subject"))
+		if err != nil {
+			response.Error(w, r, h.log, err)
+			return
+		}
+		// CSV 是文件下载，不走统一 JSON 信封
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="report.csv"`)
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write(data); err != nil {
+			h.log.Warn("写 CSV 响应失败", "child_id", childID, "error", err)
+		}
+
+	case "pdf":
+		parentID, ok := requestctx.ParentIDFromContext(r.Context())
+		if !ok {
+			response.Error(w, r, h.log, apperr.Unauthorized("登录已失效，请重新登录"))
+			return
+		}
+		jobID, err := h.svc.ExportPDF(r.Context(), parentID, childID, days)
+		if err != nil {
+			response.Error(w, r, h.log, err)
+			return
+		}
+		response.JSON(w, r, http.StatusAccepted, ExportPDFResult{
+			JobID:   jobID,
+			Status:  "queued",
+			PDFURL:  "/print/jobs/" + jobID + "/pdf",
+			DataURL: "/print/jobs/" + jobID + "/data",
+		})
+
+	default:
+		response.Error(w, r, h.log, apperr.BadRequest("format 只支持 csv 或 pdf"))
 	}
 }
 

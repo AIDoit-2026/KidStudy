@@ -205,6 +205,16 @@ type SuggestionActionResult struct {
 	Data    map[string]any `json:"data,omitempty"`
 }
 
+// ExportPDFResult 报表 PDF（周学习报告）导出结果。
+// 复用打印任务：Status 初始为 queued，前端轮询 /print/jobs/{id} 直到 pdf_ready，
+// 再从 PDFURL 下载。DataURL 是渲染数据快照，需要时可以自查内容。
+type ExportPDFResult struct {
+	JobID   string `json:"job_id"`
+	Status  string `json:"status"`
+	PDFURL  string `json:"pdf_url"`
+	DataURL string `json:"data_url"`
+}
+
 // ---------------------------------------------------------------- 节奏与效率
 
 // PacePoint 一天的节奏数据。

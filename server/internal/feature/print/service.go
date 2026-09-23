@@ -184,6 +184,36 @@ func (s *Service) CreateJob(ctx context.Context, parentID uuid.UUID, req CreateR
 	return jobView(job, spec, payload), nil
 }
 
+// WeeklyReportTemplate 是周学习报告模板的 code（报表 PDF 导出复用，见 §4.7 / §10.7）。
+const WeeklyReportTemplate = "weekly_report"
+
+// ExportWeeklyReport 把「周学习报告」做成打印任务并立即排队渲染，返回任务 ID。
+//
+// 供报表模块的 PDF 导出调用（report 只依赖接口，不 import print）。渲染仍是异步的：
+// 这里只入队，调用方拿 job_id 后轮询 /print/jobs/{id} 直到 pdf_ready。
+func (s *Service) ExportWeeklyReport(ctx context.Context, parentID, childID uuid.UUID, days int) (string, error) {
+	if childID == uuid.Nil {
+		return "", apperr.BadRequest("导出周报需要指定孩子")
+	}
+	view, err := s.CreateJob(ctx, parentID, CreateRequest{
+		TemplateCode: WeeklyReportTemplate,
+		ChildID:      &childID,
+		Params:       Params{"days": days},
+	})
+	if err != nil {
+		return "", err
+	}
+	jobID, err := uuid.Parse(view.ID)
+	if err != nil {
+		return "", apperr.Internal(fmt.Errorf("打印任务 ID 解析失败: %w", err))
+	}
+	if _, err := s.QueuePDF(ctx, parentID, jobID); err != nil {
+		return "", err
+	}
+	s.log.Info("报表周报已入队渲染", "job_id", jobID, "child_id", childID, "days", days)
+	return view.ID, nil
+}
+
 // Reprint 一键重印：用原任务的模板与参数克隆一个新任务（§4.6 / M7 收口 #4）。
 //
 // 语义是「同一张纸再来一份」，不是「重新出一套题」：

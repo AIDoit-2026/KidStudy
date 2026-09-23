@@ -39,6 +39,9 @@ type Service struct {
 	assigner   AssignmentWriter
 	difficulty DifficultyLowerer
 	pace       PaceModeSetter
+
+	// PDF 导出依赖（周报模板），由 WithPDFExporter 后置注入（见 export_pdf.go）。
+	pdf ReportPDFExporter
 }
 
 // NewService 构造报表服务。

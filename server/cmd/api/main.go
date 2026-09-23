@@ -100,10 +100,12 @@ func registerFeatures(r chi.Router, cfg config.Config, log *slog.Logger, db *pos
 	// 既然从未初始化，进程退出时也无需 Close。
 	renderer := print.NewPDFRenderer(cfg.ChromePath, cfg.PDFRenderTimeout)
 
-	printH := print.NewHandler(
-		print.NewService(print.NewRepository(db.Pool()), contentSvc, masterySvc, reportSvc, store, renderer, log),
-		log,
-	)
+	printSvc := print.NewService(print.NewRepository(db.Pool()), contentSvc, masterySvc, reportSvc, store, renderer, log)
+	printH := print.NewHandler(printSvc, log)
+
+	// 报表 PDF 复用 M5 的周报模板：export?format=pdf 会经由这里建打印任务并排队。
+	// 依赖方向是 print → report，report 只持有接口，故在 print 就绪后后置注入。
+	reportSvc.WithPDFExporter(printSvc)
 
 	// 业务 API 统一走 /api/v1；健康检查留在根路径，供编排直接探活
 	r.Route("/api/v1", func(r chi.Router) {
