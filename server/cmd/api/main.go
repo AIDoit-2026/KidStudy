@@ -77,16 +77,16 @@ func registerFeatures(r chi.Router, cfg config.Config, log *slog.Logger, db *pos
 	reportSvc := report.NewService(report.NewRepository(db.Pool()), log)
 	reportH := report.NewHandler(reportSvc, childrenSvc, log)
 
-	practiceH := practice.NewHandler(
-		practice.NewService(practice.NewRepository(db.Pool()), masterySvc, contentSvc, reportSvc, log),
-		childrenSvc,
-		log,
-	)
+	practiceSvc := practice.NewService(practice.NewRepository(db.Pool()), masterySvc, contentSvc, reportSvc, log)
+	practiceH := practice.NewHandler(practiceSvc, childrenSvc, log)
 
-	parentH := parent.NewHandler(
-		parent.NewService(parent.NewRepository(db.Pool()), log),
-		log,
-	)
+	parentSvc := parent.NewService(parent.NewRepository(db.Pool()), log)
+	parentH := parent.NewHandler(parentSvc, log)
+
+	// 报表建议的一键动作要落到 practice / mastery / parent 上。report 与 practice
+	// 互为依赖（report 用 practice 指派专项、practice 用 report 评测成就），构造顺序
+	// 无法同时满足，所以在两者都就绪后后置注入（见 report.WithActions）。
+	reportSvc.WithActions(practiceSvc, masterySvc, parentSvc)
 
 	// storage 是配置项，目录不可用说明部署配错了——这种错重启也改不掉，
 	// 与其让 print 端点零星报 500，不如不注册，让 /ready 与日志把问题说清楚。

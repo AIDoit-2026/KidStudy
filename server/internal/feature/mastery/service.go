@@ -302,6 +302,37 @@ func (s *Service) Reset(ctx context.Context, childID, kpID uuid.UUID) error {
 	return s.repo.DeleteWrongEntry(ctx, entry.ID, childID)
 }
 
+// LowerDifficulty 把某知识点的难度手动降一档（下限 MinDifficulty），返回降档后的档位。
+//
+// 供报表建议「降一档」的一键动作调用（§4.7 规则 1），与 ApplyResult 里的自动降档同口径。
+// 已在最低档时幂等返回不报错 —— 家长连点两次不该看到失败提示。
+func (s *Service) LowerDifficulty(ctx context.Context, childID, kpID uuid.UUID) (int, error) {
+	rec, ok, err := s.repo.Get(ctx, childID, kpID)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		// 还没学过这个知识点：没有可降的档。顺带区分「知识点不存在」与「没学过」，
+		// 否则家长点了没反应又查不出原因。
+		exists, err := s.repo.Exists(ctx, kpID)
+		if err != nil {
+			return 0, err
+		}
+		if !exists {
+			return 0, ErrNotFound
+		}
+		return MinDifficulty, nil
+	}
+	if rec.Difficulty <= MinDifficulty {
+		return rec.Difficulty, nil
+	}
+	rec.Difficulty--
+	if _, err := s.repo.Upsert(ctx, childID, rec); err != nil {
+		return 0, fmt.Errorf("降档失败: %w", err)
+	}
+	return rec.Difficulty, nil
+}
+
 func sameDay(a, b time.Time) bool {
 	ya, ma, da := a.Date()
 	yb, mb, db := b.Date()

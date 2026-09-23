@@ -33,6 +33,12 @@ var (
 type Service struct {
 	repo *Repository
 	log  *slog.Logger
+
+	// 建议动作的执行依赖，由 WithActions 后置注入（见 actions.go 的构造环说明）。
+	// 未注入时动作端点返回 503，不 panic —— worker 进程只跑汇总，用不到它们。
+	assigner   AssignmentWriter
+	difficulty DifficultyLowerer
+	pace       PaceModeSetter
 }
 
 // NewService 构造报表服务。

@@ -307,6 +307,15 @@ func (r *Repository) MarkAssignmentsDone(ctx context.Context, childID uuid.UUID,
 	return r.q.MarkAssignmentDone(ctx, dbgen.MarkAssignmentDoneParams{ChildID: childID, KpIds: kpIDs})
 }
 
+// UpsertAssignment 把知识点加入孩子的专项指派。数据库侧按 (child_id, kp_id) 唯一，
+// 已存在的会被重置回 pending（重复指派同一个 kp 不会堆重复行）。
+func (r *Repository) UpsertAssignment(ctx context.Context, childID, kpID, parentID uuid.UUID, reason string) error {
+	_, err := r.q.UpsertAssignment(ctx, dbgen.UpsertAssignmentParams{
+		ChildID: childID, KpID: kpID, ParentID: parentID, Reason: reason,
+	})
+	return err
+}
+
 // GetParentSettings 取家长控制项，查不到返回零值（service 侧兜默认值）。
 func (r *Repository) GetParentSettings(ctx context.Context, parentID uuid.UUID) (ParentSettings, error) {
 	row, err := r.q.GetParentSettings(ctx, parentID)

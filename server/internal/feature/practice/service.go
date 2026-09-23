@@ -190,6 +190,47 @@ func (s *Service) newKPs(ctx context.Context, childID uuid.UUID, stageCode, subj
 	return s.repo.ListNewKPsByStage(ctx, childID, subject, stageFor(subject, stageCode), kind, limit)
 }
 
+// ------------------------------------------------------------------ 专项指派
+//
+// 这几个方法供报表建议的「动作按钮」调用（§4.7）：家长在报表里点一下，就把某个
+// 知识点抬进孩子的专项队列，优先出现在今日任务。指派是幂等的（同一 kp 只留一条）。
+
+// AssignKP 把指定知识点加入孩子的专项指派。
+func (s *Service) AssignKP(ctx context.Context, parentID, childID, kpID uuid.UUID, reason string) error {
+	if err := s.repo.UpsertAssignment(ctx, childID, kpID, parentID, reason); err != nil {
+		return apperr.Internal(err)
+	}
+	return nil
+}
+
+// AssignNextOfSubject 为该学科挑一个合适的知识点并指派，返回其 ID 与名称。
+//
+// 选法沿用编排的新学口径：优先标准节奏线里下一个未学的；没铺线时按阶段兜底。
+// 返回裸值（uuid / string）而不是 PlanItem，是为了让调用方（report）不必 import practice，
+// 保持 report 不依赖 practice 的单向约定。
+func (s *Service) AssignNextOfSubject(ctx context.Context, parentID, childID uuid.UUID, subject, reason string) (uuid.UUID, string, error) {
+	kind := kindOfSubject(subject)
+	items, err := s.repo.ListNewKPsByPlan(ctx, childID, subject, kind, 1)
+	if err != nil {
+		return uuid.Nil, "", apperr.Internal(err)
+	}
+	if len(items) == 0 {
+		// 没有基准线（或已学完）时按阶段兜底：stage_code 传空表示不按阶段过滤
+		items, err = s.repo.ListNewKPsByStage(ctx, childID, subject, "", kind, 1)
+		if err != nil {
+			return uuid.Nil, "", apperr.Internal(err)
+		}
+	}
+	if len(items) == 0 {
+		return uuid.Nil, "", apperr.Conflict("这门课暂时没有可以安排的新内容")
+	}
+	picked := items[0]
+	if err := s.repo.UpsertAssignment(ctx, childID, picked.KPID, parentID, reason); err != nil {
+		return uuid.Nil, "", apperr.Internal(err)
+	}
+	return picked.KPID, picked.Name, nil
+}
+
 // ------------------------------------------------------------------ 会话
 
 // StartSession 组卷并建会话：写 learning_sessions + session_items(题面快照 + 答案)。

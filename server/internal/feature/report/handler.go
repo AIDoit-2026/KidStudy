@@ -2,9 +2,12 @@ package report
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -44,6 +47,7 @@ func (h *Handler) Register(r chi.Router) {
 			r.Get("/trend", h.trend)
 			r.Get("/subject/{subject}", h.subject)
 			r.Get("/suggestions", h.suggestions)
+			r.Post("/suggestions/actions", h.applySuggestionAction)
 			r.Get("/pace", h.pace)
 			r.Get("/growth", h.growth)
 			r.Get("/badges", h.badges)
@@ -131,6 +135,50 @@ func (h *Handler) suggestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.JSON(w, r, http.StatusOK, view)
+}
+
+// applySuggestionAction POST /reports/{childId}/suggestions/actions
+//
+// 执行建议附带的动作（§4.7）：专项练习 / 降一档 / 均衡安排 / 复习日 / 调整每日量。
+// 归属校验复用 target()（越权一律 404）；parentID 另行从上下文取，动作要写家长设置。
+func (h *Handler) applySuggestionAction(w http.ResponseWriter, r *http.Request) {
+	childID, ok := h.target(w, r)
+	if !ok {
+		return
+	}
+	parentID, ok := requestctx.ParentIDFromContext(r.Context())
+	if !ok {
+		response.Error(w, r, h.log, apperr.Unauthorized("登录已失效，请重新登录"))
+		return
+	}
+	var req SuggestionActionRequest
+	if !h.decode(w, r, &req) {
+		return
+	}
+	res, err := h.svc.ApplyAction(r.Context(), parentID, childID, req)
+	if err != nil {
+		response.Error(w, r, h.log, err)
+		return
+	}
+	response.JSON(w, r, http.StatusOK, res)
+}
+
+// decode 读取并解析 JSON 请求体，出错时已写好响应，调用方直接 return。
+func (h *Handler) decode(w http.ResponseWriter, r *http.Request, dst any) bool {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		response.Error(w, r, h.log, apperr.BadRequest("请求体读取失败"))
+		return false
+	}
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		response.Error(w, r, h.log, apperr.BadRequest("请求体不能为空"))
+		return false
+	}
+	if err := json.Unmarshal(raw, dst); err != nil {
+		response.Error(w, r, h.log, apperr.BadRequest("请求体不是合法的 JSON"))
+		return false
+	}
+	return true
 }
 
 // pace GET /reports/{childId}/pace?days=90&subject=

@@ -81,6 +81,13 @@ func (s *Service) Update(ctx context.Context, parentID uuid.UUID, req UpdateRequ
 	return saved, nil
 }
 
+// SetPaceMode 单独切换节奏模式（报表建议「设为复习日」「调整每日量」的一键动作）。
+// 直接复用 Update 的部分更新与校验路径，避免动作端点绕过设置校验写库。
+func (s *Service) SetPaceMode(ctx context.Context, parentID uuid.UUID, mode string) error {
+	_, err := s.Update(ctx, parentID, UpdateRequest{PaceMode: &mode})
+	return err
+}
+
 // validate 范围校验。边界值都给了明确文案，前端直接把 message 展示给家长。
 func validate(s Settings) error {
 	if s.DailyLimitMin < 0 || s.DailyLimitMin > 480 {

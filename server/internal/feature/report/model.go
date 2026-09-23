@@ -187,6 +187,24 @@ type SuggestionsView struct {
 	GeneratedAt time.Time    `json:"generated_at"`
 }
 
+// SuggestionActionRequest 执行建议动作的请求体（§4.7）。
+// kp_id 用于 assign_practice / lower_difficulty，subject 用于 balance_subjects。
+type SuggestionActionRequest struct {
+	Type    string `json:"type"`
+	KPID    string `json:"kp_id,omitempty"`
+	Subject string `json:"subject,omitempty"`
+}
+
+// SuggestionActionResult 动作执行结果。
+// Applied 表示动作已受理并执行；幂等动作（如已在最低档再点降档）可能没有实际变化，
+// 具体以 Detail 文案为准。
+type SuggestionActionResult struct {
+	Type    string         `json:"type"`
+	Applied bool           `json:"applied"`
+	Detail  string         `json:"detail"`
+	Data    map[string]any `json:"data,omitempty"`
+}
+
 // ---------------------------------------------------------------- 节奏与效率
 
 // PacePoint 一天的节奏数据。
