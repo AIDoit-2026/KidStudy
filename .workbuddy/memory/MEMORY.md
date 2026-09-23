@@ -12,6 +12,10 @@
   `net/http`，跨模块只走 service 接口注入。
 - 配置全来自环境变量、启动时集中校验，缺失即 fail-fast；只提交 `.env.example`。
 - 错误用 `apperr` 类型化 + 全局映射，绝不返回堆栈；响应恒为 `{data, meta.request_id}`。
+- **模块互依用「后置注入」破环**：report 与 practice 互为依赖（report 用 practice 指派专项、
+  practice 用 report 评测成就），构造顺序无法同时满足 → 先生成再
+  `reportSvc.WithActions(...)` / `WithPDFExporter(...)`。接口签名**只用 uuid/string**
+  这类基础类型，`report` 不 import `practice` 的单向约定不破。
 - 内容资产放 `var/`（gitignored）；端到端脚本入库：冒烟 `server/tests/smoke/`、UI 验收
   `server/tests/ui/`，共用 `server/tests/_common.py`（任意 CWD 可跑）；
   **UI 截图不入库**（`server/tmp/ui/` 仅留档，断言只走 `data-testid`/文本）。
@@ -34,19 +38,30 @@
 - 前端工具链走托管 node 全路径 `...\22.22.2-3\`：npm 用
   `node <该目录>/node_modules/npm/bin/npm-cli.js`（`.cmd` shim 在 Git Bash 踩坑），registry 用
   npmmirror，缓存 `--cache web/.npm-cache`；浏览器自动化见 `server/tests/ui/` README。
+- **`vite build` 会清空 `web/dist/assets` → 被沙箱 bulk-delete 守卫拦下**（`SAFE_DELETE_BULK_REJECTED`）。
+  前端编译闸门改用 `node node_modules/typescript/bin/tsc --noEmit`（不写盘，必过）；
+  要出包时改 `--outDir` 指向新目录，别让它清 dist。
 
 ## 技术栈
 - 后端 Go + chi + pgx；连接层 sqlc，**不用 ORM**（本项目是批量导入 + 复杂查询，恰是 ORM 短板）。
 - `sqlc.yaml` 必须 `sql_package: "pgx/v5"`，`schema` 只列 `migrations/*.up.sql`（含 down 会
   打乱解析）；生成物在 `internal/dbgen`（入库）。读查询走 sqlc，**批量写不走**（多行 upsert，
   200 行/语句 + 同批冲突键去重，否则 SQLSTATE 21000）。
-- 前端 Vite + React 18 + TS + Tailwind（CSS 变量主题）+ TanStack Query + Zustand + RR6。
+- 前端 Vite + React 18 + TS + Tailwind（CSS 变量主题）+ TanStack Query + Zustand + RR7。
 
 ## 接口契约易错点
 - `POST /auth/login` 只认 `{account, password}`（account 收邮箱或手机号）；注册才分 email/phone。
 - `/parent/settings`：`session_limit_min` 只收 **5–120**（0 非法）；`daily_limit_min` 0–480、
   `rest_interval_min` 0–120 才允许 0。
 - 健康检查在根路径 `/health`、`/ready`，**不在** `/api/v1` 下。
+- **校验类错误统一 422**（`apperr.BadRequest` → `VALIDATION_FAILED`/422），**不是 400**；
+  冒烟断言别写成 400。
+- **凡 `/print/jobs/{id}/data`、`/reports/...` 之类 JSON 接口都返回 `{data, meta}` 信封**，
+  取字段前先拆 `data`（冒烟脚本踩过：不拆包导致 items 恒判为空）。
+- 报表动作端点 `POST /reports/{childId}/suggestions/actions`（type=`review_day`/`tune_quota`/
+  `assign_practice`/`lower_difficulty`/`balance_subjects`）；PDF 导出
+  `GET /reports/{childId}/export?format=pdf` → 202 + 打印任务（复用 `weekly_report` 模板）；
+  打印重印 `POST /print/jobs/{id}/reprint`（克隆原参数，同 seed 逐题复现）。
 
 ## 里程碑约定
 细节见 docs/开发设计文档.md §10.x；只留容易再犯的坑：
