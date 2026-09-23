@@ -70,7 +70,7 @@ func (h *Handler) today(w http.ResponseWriter, r *http.Request) {
 
 // startSession POST /practice/session
 func (h *Handler) startSession(w http.ResponseWriter, r *http.Request) {
-	_, child, ok := h.childFromBody(w, r)
+	parentID, child, ok := h.childFromBody(w, r)
 	if !ok {
 		return
 	}
@@ -82,7 +82,7 @@ func (h *Handler) startSession(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, h.log, &req) {
 		return
 	}
-	view, err := h.svc.StartSession(r.Context(), child.ID, deref(child.StageCode), req.DeviceType, req.Subject)
+	view, err := h.svc.StartSession(r.Context(), parentID, child.ID, deref(child.StageCode), req.DeviceType, req.Subject)
 	if err != nil {
 		response.Error(w, r, h.log, err)
 		return

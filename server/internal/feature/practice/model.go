@@ -118,6 +118,7 @@ type TodayPlan struct {
 	SuggestReview    bool       `json:"suggest_review"`
 	DueCount         int        `json:"due_count"`
 	Subjects         []string   `json:"subjects"`
+	PaceMode         string     `json:"pace_mode"`
 	Items            []PlanItem `json:"items"`
 	Message          string     `json:"message,omitempty"`
 }
@@ -263,4 +264,14 @@ type ParentSettings struct {
 	DailyLimitMin        int
 	SubjectSwitches      map[string]bool
 	RequireParentConfirm bool
+	// PaceMode 节奏模式：standard 标准 / fast 加快新学 / review 只复习不学新。
+	// 空串按 standard 处理（查不到设置或老数据）。
+	PaceMode string
 }
+
+// 节奏模式取值（与 parent_settings.pace_mode 的 CHECK 一致，见迁移 0007）。
+const (
+	PaceStandard = "standard"
+	PaceFast     = "fast"
+	PaceReview   = "review"
+)

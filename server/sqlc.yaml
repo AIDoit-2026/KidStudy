@@ -12,6 +12,7 @@ sql:
       - "migrations/0004_learning.up.sql"
       - "migrations/0005_reward.up.sql"
       - "migrations/0006_print.up.sql"
+      - "migrations/0007_pace_mode.up.sql"
     queries: "queries"
     gen:
       go:

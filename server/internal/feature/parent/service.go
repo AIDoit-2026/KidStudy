@@ -96,9 +96,9 @@ func validate(s Settings) error {
 		return apperr.BadRequest("单次会话时长不能大于每日总时长")
 	}
 	switch s.PaceMode {
-	case "standard", "fast":
+	case "standard", "fast", "review":
 	default:
-		return apperr.BadRequest("节奏模式只能是 standard 或 fast")
+		return apperr.BadRequest("节奏模式只能是 standard / fast / review")
 	}
 	return nil
 }

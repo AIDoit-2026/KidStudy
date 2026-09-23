@@ -61,6 +61,15 @@ func NewService(repo *Repository, masterySvc *mastery.Service, contentSvc Conten
 // 顺序按 §4.2：错题置顶 → 到期复习 → 新学 → 家长专项。同一 kp 只出现一次，
 // 按「错题 > 专项 > 复习 > 新学」的优先级保留最先出现的那条。
 func (s *Service) Plan(ctx context.Context, parentID, childID uuid.UUID, stageCode string, wantSubjects []string) (TodayPlan, error) {
+	return s.plan(ctx, parentID, childID, stageCode, wantSubjects, true)
+}
+
+// plan 是编排的实际实现。
+//
+// quotaGate 控制「每日额度用尽时是否还排新学」：今日任务卡（预览）为 true，
+// 让孩子看到「今天到量了」；直接开始会话时为 false —— 家长/孩子有权决定从哪开始，
+// 额度只作提示不阻断。学科开关与节奏模式两种情况都照常生效。
+func (s *Service) plan(ctx context.Context, parentID, childID uuid.UUID, stageCode string, wantSubjects []string, quotaGate bool) (TodayPlan, error) {
 	now := Now()
 	dayStart := startOfDay(now)
 
@@ -83,6 +92,10 @@ func (s *Service) Plan(ctx context.Context, parentID, childID uuid.UUID, stageCo
 	}
 
 	subjects := enabledSubjects(settings.SubjectSwitches, wantSubjects)
+	pace := settings.PaceMode
+	if pace == "" {
+		pace = PaceStandard
+	}
 
 	queue, err := s.mastery.ReviewQueue(ctx, childID, "", DefaultReviewMax)
 	if err != nil {
@@ -120,14 +133,14 @@ func (s *Service) Plan(ctx context.Context, parentID, childID uuid.UUID, stageCo
 	appendItems(assigned, ReasonAssigned)
 	// 3. 到期复习
 	appendItems(reviewItems(queue.Items), ReasonReview)
-	// 4. 新学：复习积压时暂停新学，先把欠账补上（§4.4 复习积压保护）
-	if !queue.Backlog {
+	// 4. 新学：复习积压、只复习模式、或额度用尽时都不安排新学（§4.4 复习积压保护）
+	if !queue.Backlog && pace != PaceReview {
 		for _, subject := range subjects {
 			if len(items) >= MaxSessionItems {
 				break
 			}
-			limit := newLimitFor(subject)
-			if remaining <= 0 {
+			limit := newLimitFor(subject, pace)
+			if quotaGate && remaining <= 0 {
 				break
 			}
 			newItems, err := s.newKPs(ctx, childID, stageCode, subject, limit)
@@ -151,6 +164,7 @@ func (s *Service) Plan(ctx context.Context, parentID, childID uuid.UUID, stageCo
 		SuggestReview:    queue.SuggestReview,
 		DueCount:         int(queue.DueCount),
 		Subjects:         subjects,
+		PaceMode:         pace,
 		Items:            items,
 	}
 	plan.Message = planMessage(plan)
@@ -160,7 +174,7 @@ func (s *Service) Plan(ctx context.Context, parentID, childID uuid.UUID, stageCo
 // newKPs 取新学知识点：优先按标准节奏基准线的 Day 序号，没铺线时按阶段兜底。
 func (s *Service) newKPs(ctx context.Context, childID uuid.UUID, stageCode, subject string, limit int) ([]PlanItem, error) {
 	if limit <= 0 {
-		limit = newLimitFor(subject)
+		limit = newLimitFor(subject, PaceStandard)
 	}
 	if limit > MaxNewPerSubject {
 		limit = MaxNewPerSubject
@@ -179,10 +193,11 @@ func (s *Service) newKPs(ctx context.Context, childID uuid.UUID, stageCode, subj
 // ------------------------------------------------------------------ 会话
 
 // StartSession 组卷并建会话：写 learning_sessions + session_items(题面快照 + 答案)。
-func (s *Service) StartSession(ctx context.Context, childID uuid.UUID, stageCode, deviceType, subject string) (SessionView, error) {
-	// 编排需要 parentID 读设置；这里只按学科过滤，额度校验在 Plan 里已经体现，
-	// 家长强制开始的会话不受额度限制（家长有权决定）。
-	plan, err := s.Plan(ctx, uuid.Nil, childID, stageCode, splitSubjects(subject))
+func (s *Service) StartSession(ctx context.Context, parentID, childID uuid.UUID, stageCode, deviceType, subject string) (SessionView, error) {
+	// 用真实 parentID 读家长设置：学科开关与节奏模式要对孩子端会话生效。
+	// 之前传 uuid.Nil 等于家长设置对孩子端完全无效（设置了不生效）。
+	// quotaGate=false：额度只作提示，不阻断孩子从哪里开始（家长有权决定）。
+	plan, err := s.plan(ctx, parentID, childID, stageCode, splitSubjects(subject), false)
 	if err != nil {
 		return SessionView{}, err
 	}
@@ -663,15 +678,22 @@ func stageFor(subject, stageCode string) string {
 	return ""
 }
 
-func newLimitFor(subject string) int {
+func newLimitFor(subject, pace string) int {
+	base := DefaultNewChinese
 	switch subject {
 	case "english":
-		return DefaultNewEnglish
+		base = DefaultNewEnglish
 	case "math":
-		return DefaultNewMath
-	default:
-		return DefaultNewChinese
+		base = DefaultNewMath
 	}
+	if pace == PaceFast {
+		// 「加快新学」= 标准量再加 50%（向上取整），并封顶在单科上限。
+		base = (base*3 + 1) / 2
+		if base > MaxNewPerSubject {
+			base = MaxNewPerSubject
+		}
+	}
+	return base
 }
 
 // enabledSubjects 学科开关为空表示三科全开；wantSubjects 是本次请求指定的学科。
@@ -726,6 +748,8 @@ func startOfDay(t time.Time) time.Time {
 
 func planMessage(p TodayPlan) string {
 	switch {
+	case p.PaceMode == PaceReview:
+		return "今天是复习日，先把已经学过的过一遍"
 	case p.Backlog:
 		return "到期复习有点多，今天先专心复习吧"
 	case p.RemainingMinutes <= 0:

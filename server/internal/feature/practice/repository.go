@@ -316,7 +316,7 @@ func (r *Repository) GetParentSettings(ctx context.Context, parentID uuid.UUID) 
 		}
 		return ParentSettings{}, err
 	}
-	settings := ParentSettings{DailyLimitMin: int(row.DailyLimitMin)}
+	settings := ParentSettings{DailyLimitMin: int(row.DailyLimitMin), PaceMode: row.PaceMode}
 	if len(row.SubjectSwitches) > 0 {
 		var m map[string]bool
 		if err := json.Unmarshal(row.SubjectSwitches, &m); err == nil {
