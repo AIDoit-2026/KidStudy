@@ -34,7 +34,10 @@ export function ViewingDistanceHint() {
   }
 
   return (
-    <div className="fixed inset-x-0 bottom-4 z-30 mx-auto flex w-[min(92vw,34rem)] items-center gap-3 rounded-2xl border border-line bg-raised p-4 shadow-lg">
+    <div
+      className="fixed inset-x-0 bottom-4 z-30 mx-auto flex w-[min(92vw,34rem)] items-center gap-3 rounded-2xl border border-line bg-raised p-4 shadow-lg"
+      role="status"
+    >
       <span className="text-2xl" aria-hidden="true">
         👀
       </span>

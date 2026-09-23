@@ -89,9 +89,16 @@ export function QrLoginPage() {
       <h1 className="mb-1 text-2xl font-bold">扫码登录</h1>
       <p className="mb-5 text-sm text-ink-soft">用已经登录的手机扫一下，大屏就能同步登录。</p>
 
-      <div className="mx-auto mb-4 flex h-56 w-56 items-center justify-center rounded-2xl border border-line bg-white p-3">
+      {/* role=status + aria-live：扫码四态变化（已扫码 / 登录成功 / 已过期）要能被读屏听到 */}
+      <div
+        className="mx-auto mb-4 flex h-56 w-56 items-center justify-center rounded-2xl border border-line bg-white p-3"
+        role="status"
+        aria-live="polite"
+      >
         {phase === 'waiting' && qr ? (
-          <QRCodeSVG value={qr.deep_link} size={200} level="M" />
+          <span role="img" aria-label="登录二维码，请用已登录的手机扫描">
+            <QRCodeSVG value={qr.deep_link} size={200} level="M" />
+          </span>
         ) : phase === 'scanned' ? (
           <div className="text-ink-soft">
             <p className="text-lg font-semibold text-ink">已扫码</p>

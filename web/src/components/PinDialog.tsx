@@ -4,7 +4,7 @@
  * 校验走后端 /auth/pin/verify（失败锁定也在服务端，前端改不了），
  * 成功后拿到的是短期 unlock 令牌，不是 access 令牌 —— 两者用途隔离。
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 
 import { readableError } from '../api/client'
 import { verifyPin } from '../api/endpoints/auth'
@@ -28,6 +28,7 @@ export function PinDialog({
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const unlockedRef = useRef(onUnlocked)
 
   useEffect(() => {
@@ -36,12 +37,43 @@ export function PinDialog({
 
   useEffect(() => {
     if (!open) return
+    // 记住触发弹窗的元素，关闭时把焦点还回去，键盘用户不至于掉回页面顶部
+    const previous = document.activeElement as HTMLElement | null
     setPin('')
     setError('')
     setBusy(false)
     const timer = window.setTimeout(() => inputRef.current?.focus(), 60)
-    return () => window.clearTimeout(timer)
+    return () => {
+      window.clearTimeout(timer)
+      previous?.focus?.()
+    }
   }, [open])
+
+  // 焦点陷阱 + Esc 关闭：aria-modal 只声明「背景不可交互」，
+  // 但键盘仍能 Tab 出去，所以要把焦点圈在弹窗内（无障碍走查项）。
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      onClose()
+      return
+    }
+    if (event.key !== 'Tab') return
+    const root = panelRef.current
+    if (!root) return
+    const focusables = root.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])',
+    )
+    if (focusables.length === 0) return
+    const first = focusables[0]
+    const last = focusables[focusables.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
 
   if (!open) return null
 
@@ -74,7 +106,7 @@ export function PinDialog({
     >
       {/* 内层负责居中：屏幕矮 + 大字号时弹窗可滚，不至于把「解锁」按钮顶出视口 */}
       <div className="flex min-h-full items-center justify-center p-4">
-        <div className="card w-full max-w-sm">
+        <div ref={panelRef} onKeyDown={onKeyDown} className="card w-full max-w-sm">
           <h2 className="mb-1 text-lg font-bold">{title}</h2>
           {description && <p className="mb-3 text-sm text-ink-soft">{description}</p>}
           <input
