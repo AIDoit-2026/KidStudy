@@ -12,6 +12,7 @@ import (
 
 	"kidstudy/internal/config"
 	"kidstudy/internal/platform/apperr"
+	"kidstudy/internal/platform/middleware"
 	"kidstudy/internal/platform/requestctx"
 	"kidstudy/internal/platform/response"
 )
@@ -32,20 +33,29 @@ func NewHandler(svc *Service, cfg config.Config, log *slog.Logger) *Handler {
 }
 
 // Register 挂载 auth 路由。其中需要登录的端点由 middleware.RequireAuth 保护。
-func (h *Handler) Register(r chi.Router, requireAuth func(http.Handler) http.Handler) {
+// limiters 提供登录/扫码两档限流：登录与注册、PIN 校验走登录档（凭据猜测面），
+// 扫码的建码/兑换/扫码/确认走扫码档。
+func (h *Handler) Register(r chi.Router, requireAuth func(http.Handler) http.Handler, limiters *middleware.Limiters) {
 	r.Route("/auth", func(r chi.Router) {
-		r.Post("/register", h.register)
-		r.Post("/login", h.login)
+		r.Group(func(r chi.Router) {
+			r.Use(limiters.Login)
+			r.Post("/register", h.register)
+			r.Post("/login", h.login)
+		})
 		r.Post("/refresh", h.refresh)
 
-		h.registerQR(r, requireAuth)
+		h.registerQR(r, requireAuth, limiters)
 
 		r.Group(func(r chi.Router) {
 			r.Use(requireAuth)
 			r.Post("/logout", h.logout)
 			r.Get("/me", h.me)
 			r.Put("/pin", h.setPIN)
-			r.Post("/pin/verify", h.verifyPIN)
+			r.Group(func(r chi.Router) {
+				// PIN 只有 4 位，是典型的可枚举凭据，校验同样走登录档限流
+				r.Use(limiters.Login)
+				r.Post("/pin/verify", h.verifyPIN)
+			})
 		})
 	})
 }

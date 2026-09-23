@@ -45,6 +45,15 @@ func registerFeatures(r chi.Router, cfg config.Config, log *slog.Logger, db *pos
 	tokens := platformauth.NewTokenService(cfg.AuthSecret, cfg.AccessTokenTTL, cfg.UnlockTokenTTL)
 	requireAuth := middleware.RequireAuth(tokens, log)
 
+	// 限流三档：登录（凭据猜测）/扫码（可被脚本刷）/打印（触发渲染的重活）。
+	limiters := middleware.NewLimiters(
+		cfg.RateLimitEnabled,
+		middleware.LimitSpec{PerMin: cfg.RateLimitLoginPerMin, Burst: cfg.RateLimitLoginBurst},
+		middleware.LimitSpec{PerMin: cfg.RateLimitQRPerMin, Burst: cfg.RateLimitQRBurst},
+		middleware.LimitSpec{PerMin: cfg.RateLimitPrintPerMin, Burst: cfg.RateLimitPrintBurst},
+		log,
+	)
+
 	authSvc := auth.NewService(auth.NewRepository(db.Pool()), tokens, cfg, log)
 	authH := auth.NewHandler(authSvc, cfg, log)
 
@@ -98,7 +107,7 @@ func registerFeatures(r chi.Router, cfg config.Config, log *slog.Logger, db *pos
 
 	// 业务 API 统一走 /api/v1；健康检查留在根路径，供编排直接探活
 	r.Route("/api/v1", func(r chi.Router) {
-		authH.Register(r, requireAuth)
+		authH.Register(r, requireAuth, limiters)
 
 		r.Group(func(r chi.Router) {
 			r.Use(requireAuth)
@@ -109,7 +118,7 @@ func registerFeatures(r chi.Router, cfg config.Config, log *slog.Logger, db *pos
 			practiceH.Register(r)
 			reportH.Register(r)
 			parentH.Register(r)
-			printH.Register(r)
+			printH.Register(r, limiters)
 		})
 	})
 }

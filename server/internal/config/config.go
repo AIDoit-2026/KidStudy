@@ -46,6 +46,17 @@ type Config struct {
 	// CORS：生产禁用通配符
 	CORSAllowedOrigins []string `env:"CORS_ALLOWED_ORIGINS" envDefault:"http://localhost:5173" envSeparator:","`
 
+	// 限流（M7）：按客户端 IP 分桶，三类敏感端点各一档。
+	// 登录是低频高价值（撞库），扫码是高频读（轮询 events），打印是重活（触发 PDF 渲染），
+	// 给同一个桶要么误伤扫码、要么放过刷打印，因此分开配置。关闭后全部直通。
+	RateLimitEnabled     bool `env:"RATE_LIMIT_ENABLED" envDefault:"true"`
+	RateLimitLoginPerMin int  `env:"RATE_LIMIT_LOGIN_PER_MIN" envDefault:"12"`
+	RateLimitLoginBurst  int  `env:"RATE_LIMIT_LOGIN_BURST" envDefault:"6"`
+	RateLimitQRPerMin    int  `env:"RATE_LIMIT_QR_PER_MIN" envDefault:"120"`
+	RateLimitQRBurst     int  `env:"RATE_LIMIT_QR_BURST" envDefault:"40"`
+	RateLimitPrintPerMin int  `env:"RATE_LIMIT_PRINT_PER_MIN" envDefault:"30"`
+	RateLimitPrintBurst  int  `env:"RATE_LIMIT_PRINT_BURST" envDefault:"10"`
+
 	// 时间与停机
 	ReadTimeout    time.Duration `env:"HTTP_READ_TIMEOUT" envDefault:"15s"`
 	WriteTimeout   time.Duration `env:"HTTP_WRITE_TIMEOUT" envDefault:"30s"`
@@ -155,6 +166,27 @@ func (c Config) Validate() error {
 	for _, o := range c.CORSAllowedOrigins {
 		if strings.TrimSpace(o) == "" {
 			errs = append(errs, "CORS_ALLOWED_ORIGINS 含空项")
+		}
+	}
+
+	// 限流：只在启用时校验，关闭时允许留空。顺序固定，错误文案可复现。
+	if c.RateLimitEnabled {
+		scopes := []struct {
+			name  string
+			perMN int
+			burst int
+		}{
+			{"RATE_LIMIT_LOGIN", c.RateLimitLoginPerMin, c.RateLimitLoginBurst},
+			{"RATE_LIMIT_QR", c.RateLimitQRPerMin, c.RateLimitQRBurst},
+			{"RATE_LIMIT_PRINT", c.RateLimitPrintPerMin, c.RateLimitPrintBurst},
+		}
+		for _, s := range scopes {
+			if s.perMN <= 0 {
+				errs = append(errs, fmt.Sprintf("%s_PER_MIN 必须大于 0", s.name))
+			}
+			if s.burst <= 0 {
+				errs = append(errs, fmt.Sprintf("%s_BURST 必须大于 0", s.name))
+			}
 		}
 	}
 

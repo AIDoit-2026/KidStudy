@@ -7,25 +7,32 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"kidstudy/internal/platform/middleware"
 	"kidstudy/internal/platform/requestctx"
 	"kidstudy/internal/platform/response"
 )
 
 // registerQR 挂载扫码登录路由。
 // 取二维码与兑换都不需要登录（正因为没登录才要扫码），扫码与确认必须已登录。
-func (h *Handler) registerQR(r chi.Router, requireAuth func(http.Handler) http.Handler) {
+// 除 SSE 外的端点都挂扫码档限流：建码/兑换/扫码/确认都是可被脚本刷的动作。
+func (h *Handler) registerQR(r chi.Router, requireAuth func(http.Handler) http.Handler, limiters *middleware.Limiters) {
 	r.Route("/qrcode", func(r chi.Router) {
-		r.Get("/", h.qrStart)
-		r.Post("/exchange", h.qrExchange)
+		r.Group(func(r chi.Router) {
+			r.Use(limiters.QR)
+			r.Get("/", h.qrStart)
+			r.Post("/exchange", h.qrExchange)
+		})
 
 		r.Group(func(r chi.Router) {
 			r.Use(requireAuth)
+			r.Use(limiters.QR)
 			r.Post("/scan", h.qrScan)
 			r.Post("/confirm", h.qrConfirm)
 		})
 
 		// SSE 走 GET，浏览器原生 EventSource 无法带 Authorization 头，
-		// 因此令牌放在路径里；令牌本身是一次性且 60 秒过期，风险可控
+		// 因此令牌放在路径里；令牌本身是一次性且 60 秒过期，风险可控。
+		// 这里不挂限流：长连接 + 断线自动重连，限流会误伤正常重连。
 		r.Get("/{token}/events", h.qrEvents)
 	})
 }

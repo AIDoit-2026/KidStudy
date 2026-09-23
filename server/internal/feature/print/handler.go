@@ -13,6 +13,7 @@ import (
 
 	"kidstudy/internal/pkg/pagination"
 	"kidstudy/internal/platform/apperr"
+	"kidstudy/internal/platform/middleware"
 	"kidstudy/internal/platform/requestctx"
 	"kidstudy/internal/platform/response"
 	"kidstudy/internal/platform/storage"
@@ -33,16 +34,23 @@ func NewHandler(svc *Service, log *slog.Logger) *Handler {
 //
 // /parent/print-jobs 由本模块注册而不是 parent 模块：它是打印记录列表，
 // 数据与口径都在这里，放过去只会多一层转发。
-func (h *Handler) Register(r chi.Router) {
+//
+// 只读端点不限流；建任务/预览/出 PDF 是重活（查内容装 payload、渲染 HTML、
+// 触发 worker 的 Chromium 渲染），统一走打印档限流。
+func (h *Handler) Register(r chi.Router, limiters *middleware.Limiters) {
 	r.Get("/print/templates", h.templates)
-	r.Post("/print/jobs", h.createJob)
 	r.Get("/print/jobs/{id}", h.getJob)
 	r.Get("/print/jobs/{id}/data", h.jobData)
-	r.Get("/print/jobs/{id}/preview", h.preview)
-	r.Post("/print/jobs/{id}/pdf", h.queuePDF)
 	r.Get("/print/jobs/{id}/pdf", h.downloadPDF)
-	r.Post("/print/jobs/{id}/mark-done", h.markDone)
 	r.Get("/parent/print-jobs", h.listJobs)
+	r.Post("/print/jobs/{id}/mark-done", h.markDone)
+
+	r.Group(func(r chi.Router) {
+		r.Use(limiters.Print)
+		r.Post("/print/jobs", h.createJob)
+		r.Get("/print/jobs/{id}/preview", h.preview)
+		r.Post("/print/jobs/{id}/pdf", h.queuePDF)
+	})
 }
 
 // templates GET /print/templates
